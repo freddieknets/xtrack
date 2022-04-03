@@ -332,7 +332,8 @@ class Tracker:
         eneloss_and_damping=False,
         matrix_responsiveness_tol=None,
         matrix_stability_tol=None,
-        symplectify=False
+        symplectify=False,
+        accurate_dispersion=False
         ):
 
         if matrix_responsiveness_tol is None:
@@ -367,7 +368,7 @@ class Tracker:
             eneloss_and_damping=eneloss_and_damping,
             matrix_responsiveness_tol=matrix_responsiveness_tol,
             matrix_stability_tol=matrix_stability_tol,
-            symplectify=symplectify)
+            symplectify=symplectify, accurate_dispersion=accurate_dispersion)
 
 
     def filter_elements(self, mask=None, exclude_types_starting_with=None):

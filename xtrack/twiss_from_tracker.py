@@ -317,31 +317,52 @@ def twiss_from_tracker(tracker, particle_ref, r_sigma=0.01,
     part_for_twiss = xp.Particles.merge([part_for_twiss, part_disp])
 
     tracker.track(part_for_twiss, turn_by_turn_monitor='ONE_TURN_EBE')
+    record_ebe_for_twiss = tracker.record_last_track
 
     eta = -((part_for_twiss._xobject.zeta[6] - part_for_twiss._xobject.zeta[5])
-                /(2*delta_disp)/circumference))
+                /(2*delta_disp)/circumference)
     alpha = eta + 1/part_on_co._xobject.gamma0[0]**2
 
+    x_co = record_ebe_for_twiss.x[4, :].copy()
+    y_co = record_ebe_for_twiss.y[4, :].copy()
+    px_co = record_ebe_for_twiss.px[4, :].copy()
+    py_co = record_ebe_for_twiss.py[4, :].copy()
+    zeta_co = record_ebe_for_twiss.zeta[4, :].copy()
+    delta_co = record_ebe_for_twiss.delta[4, :].copy()
+    ptau_co = record_ebe_for_twiss.ptau[4, :].copy()
 
-    x_co = tracker.record_last_track.x[4, :].copy()
-    y_co = tracker.record_last_track.y[4, :].copy()
-    px_co = tracker.record_last_track.px[4, :].copy()
-    py_co = tracker.record_last_track.py[4, :].copy()
-    zeta_co = tracker.record_last_track.zeta[4, :].copy()
-    delta_co = tracker.record_last_track.delta[4, :].copy()
-    ptau_co = tracker.record_last_track.ptau[4, :].copy()
+    if accurate_dispersion:
+        p_disp_minus = tracker.find_closed_orbit(particle_co_guess=part_on_co,
+            delta_zeta = -eta * circumference * (-delta_disp))
+        p_disp_plus = tracker.find_closed_orbit(particle_co_guess=part_on_co,
+            delta_zeta = -eta * circumference * (delta_disp))
+        p_disp = xp.Particles.merge([p_disp_minus, p_disp_plus])
+        tracker.track(p_disp, turn_by_turn_monitor='ONE_TURN_EBE')
+        record_ebe_for_disp = tracker.record_last_track
 
-    x_disp_minus = tracker.record_last_track.x[5, :].copy()
-    y_disp_minus = tracker.record_last_track.y[5, :].copy()
-    px_disp_minus = tracker.record_last_track.px[5, :].copy()
-    py_disp_minus = tracker.record_last_track.py[5, :].copy()
-    delta_disp_minus = tracker.record_last_track.delta[5, :].copy()
+        x_disp_minus = record_ebe_for_disp.x[0, :].copy()
+        y_disp_minus = record_ebe_for_disp.y[0, :].copy()
+        px_disp_minus = record_ebe_for_disp.px[0, :].copy()
+        py_disp_minus = record_ebe_for_disp.py[0, :].copy()
+        delta_disp_minus = record_ebe_for_disp.delta[0, :].copy()
 
-    x_disp_plus = tracker.record_last_track.x[6, :].copy()
-    y_disp_plus = tracker.record_last_track.y[6, :].copy()
-    px_disp_plus = tracker.record_last_track.px[6, :].copy()
-    py_disp_plus = tracker.record_last_track.py[6, :].copy()
-    delta_disp_plus = tracker.record_last_track.delta[6, :].copy()
+        x_disp_plus = record_ebe_for_disp.x[1, :].copy()
+        y_disp_plus = record_ebe_for_disp.y[1, :].copy()
+        px_disp_plus = record_ebe_for_disp.px[1, :].copy()
+        py_disp_plus = record_ebe_for_disp.py[1, :].copy()
+        delta_disp_plus = record_ebe_for_disp.delta[1, :].copy()
+    else:
+        x_disp_minus = record_ebe_for_twiss.x[5, :].copy()
+        y_disp_minus = record_ebe_for_twiss.y[5, :].copy()
+        px_disp_minus = record_ebe_for_twiss.px[5, :].copy()
+        py_disp_minus = record_ebe_for_twiss.py[5, :].copy()
+        delta_disp_minus = record_ebe_for_twiss.delta[5, :].copy()
+
+        x_disp_plus = record_ebe_for_twiss.x[6, :].copy()
+        y_disp_plus = record_ebe_for_twiss.y[6, :].copy()
+        px_disp_plus = record_ebe_for_twiss.px[6, :].copy()
+        py_disp_plus = record_ebe_for_twiss.py[6, :].copy()
+        delta_disp_plus = record_ebe_for_twiss.delta[6, :].copy()
 
     dx = (x_disp_plus-x_disp_minus)/(delta_disp_plus - delta_disp_minus)
     dy = (y_disp_plus-y_disp_minus)/(delta_disp_plus - delta_disp_minus)
@@ -349,10 +370,10 @@ def twiss_from_tracker(tracker, particle_ref, r_sigma=0.01,
     dpy = (py_disp_plus-py_disp_minus)/(delta_disp_plus - delta_disp_minus)
 
     W4 = np.zeros(shape=(4,4,len(s)), dtype=np.float64)
-    W4[0, :, :] = (tracker.record_last_track.x[:4, :] - x_co) / scale_transverse_x
-    W4[1, :, :] = (tracker.record_last_track.px[:4, :] - px_co) / scale_transverse_x
-    W4[2, :, :] = (tracker.record_last_track.y[:4, :]  - y_co) / scale_transverse_y
-    W4[3, :, :] = (tracker.record_last_track.py[:4, :] - py_co) / scale_transverse_y
+    W4[0, :, :] = (record_ebe_for_twiss.x[:4, :] - x_co) / scale_transverse_x
+    W4[1, :, :] = (record_ebe_for_twiss.px[:4, :] - px_co) / scale_transverse_x
+    W4[2, :, :] = (record_ebe_for_twiss.y[:4, :]  - y_co) / scale_transverse_y
+    W4[3, :, :] = (record_ebe_for_twiss.py[:4, :] - py_co) / scale_transverse_y
 
     betx = W4[0, 0, :]**2 + W4[0, 1, :]**2
     bety = W4[2, 2, :]**2 + W4[2, 3, :]**2
