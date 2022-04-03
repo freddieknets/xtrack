@@ -236,7 +236,7 @@ def twiss_from_tracker(tracker, particle_ref, r_sigma=0.01,
         eneloss_and_damping=False,
         matrix_responsiveness_tol=lnf.DEFAULT_MATRIX_RESPONSIVENESS_TOL,
         matrix_stability_tol=lnf.DEFAULT_MATRIX_STABILITY_TOL,
-        symplectify=False):
+        symplectify=False, accurate_dispersion=False):
 
     if at_s is not None:
 
@@ -272,6 +272,10 @@ def twiss_from_tracker(tracker, particle_ref, r_sigma=0.01,
                                 particle_co_guess=particle_co_guess,
                                 particle_ref=particle_ref,
                                 co_search_settings=co_search_settings)
+
+    beta0 = part_on_co._xobject.beta0[0]
+    circumference = tracker.line.get_length()
+    T_rev = circumference/clight/beta0
 
     RR = tracker.compute_one_turn_matrix_finite_differences(
                                                 steps_r_matrix=steps_r_matrix,
@@ -313,6 +317,18 @@ def twiss_from_tracker(tracker, particle_ref, r_sigma=0.01,
     part_for_twiss = xp.Particles.merge([part_for_twiss, part_disp])
 
     tracker.track(part_for_twiss, turn_by_turn_monitor='ONE_TURN_EBE')
+
+    eta = -((part_for_twiss._xobject.zeta[6] - part_for_twiss._xobject.zeta[5])
+                /(2*delta_disp)/circumference))
+    alpha = eta + 1/part_on_co._xobject.gamma0[0]**2
+
+    if accurate_dispersion:
+        part_disp_plus = tracker.find_closed_orbit(particle_co_guess=part_on_co,
+                            delta_zeta=-delta_disp*eta*circumference,
+                            co_search_settings=co_search_settings)
+        part_disp_minus = tracker.find_closed_orbit(particle_co_guess=part_on_co,
+                            delta_zeta=delta_disp*eta*circumference,
+                            co_search_settings=co_search_settings)
 
     x_co = tracker.record_last_track.x[4, :].copy()
     y_co = tracker.record_last_track.y[4, :].copy()
@@ -358,10 +374,6 @@ def twiss_from_tracker(tracker, particle_ref, r_sigma=0.01,
 
     mux = np.unwrap(np.arctan2(W4[0, 1, :], W4[0, 0, :]))/2/np.pi
     muy = np.unwrap(np.arctan2(W4[2, 3, :], W4[2, 2, :]))/2/np.pi
-
-    eta = -((part_for_twiss._xobject.zeta[6] - part_for_twiss._xobject.zeta[5])
-                /(2*delta_disp)/tracker.line.get_length())
-    alpha = eta + 1/part_on_co._xobject.gamma0[0]**2
 
     part_chrom_plus = xp.build_particles(
                 _context=context,
@@ -426,9 +438,6 @@ def twiss_from_tracker(tracker, particle_ref, r_sigma=0.01,
 
     qs = np.angle(np.linalg.eig(Rot)[0][4])/(2*np.pi)
 
-    beta0 = part_on_co._xobject.beta0[0]
-    circumference = tracker.line.get_length()
-    T_rev = circumference/clight/beta0
 
     if eneloss_and_damping:
         diff_ptau = np.diff(ptau_co)
