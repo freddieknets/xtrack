@@ -322,13 +322,6 @@ def twiss_from_tracker(tracker, particle_ref, r_sigma=0.01,
                 /(2*delta_disp)/circumference))
     alpha = eta + 1/part_on_co._xobject.gamma0[0]**2
 
-    if accurate_dispersion:
-        part_disp_plus = tracker.find_closed_orbit(particle_co_guess=part_on_co,
-                            delta_zeta=-delta_disp*eta*circumference,
-                            co_search_settings=co_search_settings)
-        part_disp_minus = tracker.find_closed_orbit(particle_co_guess=part_on_co,
-                            delta_zeta=delta_disp*eta*circumference,
-                            co_search_settings=co_search_settings)
 
     x_co = tracker.record_last_track.x[4, :].copy()
     y_co = tracker.record_last_track.y[4, :].copy()
