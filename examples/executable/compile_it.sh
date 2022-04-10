@@ -1,0 +1,1 @@
+clang exec_source.c -o hello
