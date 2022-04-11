@@ -7,7 +7,6 @@ import xpart as xp
 
 p0 = xp.Particles(mass0=xp.PROTON_MASS_EV, p0c=7e12, x=[99,99, 99])
 p = xp.Particles(mass0=xp.PROTON_MASS_EV, p0c=7e12, x=[1e-3,2e-3,3e-3], _buffer=p0._buffer)
-p = p0
 
 
 line = xt.Line(elements=[
@@ -43,6 +42,12 @@ os.system('bash compile_it.sh')
 os.system('./hello')
 
 buffer_out = p._buffer.context.new_buffer(capacity=p._buffer.capacity)
-buffer_out.buffer[:] = np.fromfile('part_out.bin', dtype=np.int8)
+with open('part_out.bin', 'rb') as fid:
+    part_bytes = fid.read(p._buffer.capacity)
+buffer_out.buffer = np.frombuffer(part_bytes, dtype=np.int8)
+p_data = xp.Particles.XoStruct._from_buffer(buffer=buffer_out, offset=p._offset)
+p_out = xp.Particles(_xobject=p_data)
 
-p_out = xp.Particles(_buffer=buffer_out, _offset=p._offset)
+
+
+
