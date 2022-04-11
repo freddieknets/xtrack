@@ -10,7 +10,10 @@ int main(){
     conf_fid = fopen("./conf.txt", "r");
     int part_buffer_size;
     fscanf(conf_fid,"%d",&part_buffer_size);
+    int part_offset;
+    fscanf(conf_fid,"%d",&part_offset);
     printf("part buffer size: %d\n", part_buffer_size);
+    printf("part offset: %d\n", part_offset);
 
 
     FILE *ptr;
