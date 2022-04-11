@@ -16,6 +16,7 @@ int main(){
     fscanf(conf_fid,"%d",&line_buffer_size);
     int num_elements;
     fscanf(conf_fid,"%d",&num_elements);
+
     printf("part buffer size: %d\n", part_buffer_size);
     printf("part offset: %d\n", part_offset);
     printf("line buffer size: %d\n", line_buffer_size);
@@ -47,21 +48,35 @@ int main(){
     for (int ii=0; ii<ParticlesData_get__capacity(part); ii++){
         printf("x[%d] = %e\n", ii, ParticlesData_get_x(part, (int64_t) ii));
     }
+
+    FILE *line_fid;
+    line_fid = fopen("./line.bin", "rb");
+    int8_t* line_buffer = malloc(line_buffer_size*sizeof(int8_t));
+    fread(line_buffer, sizeof(int8_t), line_buffer_size, line_fid);
+
     // This is what we want to call
-    //track_line(
-    //    int8_t* buffer,
-    //    int64_t* ele_offsets,
-    //    int64_t* ele_typeids,
-    //    ParticlesData particles,
-    //    int num_turns,
-    //    int ele_start,
-    //    int num_ele_track,
-    //    int flag_end_turn_actions,
-    //    int flag_reset_s_at_end_turn,
-    //    int flag_monitor,
-    //    int8_t* buffer_tbt_monitor,
-    //    int64_t offset_tbt_monitor);
+    track_line(
+          line_buffer, //    int8_t* buffer,
+          line_ele_offsets, //    int64_t* ele_offsets,
+          line_ele_typeids, //    int64_t* ele_typeids,
+          part, //    ParticlesData particles,
+          2, //    int num_turns,
+          0, //    int ele_start,
+          num_elements, //    int num_ele_track,
+          0, //int flag_end_turn_actions,
+          0, //int flag_reset_s_at_end_turn,
+          0, //    int flag_monitor,
+          NULL,//    int8_t* buffer_tbt_monitor,
+          0//    int64_t offset_tbt_monitor
+    );
 
 
+    for (int ii=0; ii<ParticlesData_get__capacity(part); ii++){
+        printf("s[%d] = %e\n", ii, ParticlesData_get_s(part, (int64_t) ii));
+    }
+
+    FILE *part_out_fid;
+    part_out_fid = fopen("./part_out.bin", "wb");
+    fwrite(part_buffer, sizeof(int8_t), part_buffer_size, part_out_fid);
     return 0;
 }
