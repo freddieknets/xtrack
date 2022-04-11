@@ -3,7 +3,7 @@ import xtrack as xt
 import xpart as xp
 
 
-p0 = xp.Particles(mass0=xp.PROTON_MASS_EV, p0c=7e12, x=[10,20,30])
+p0 = xp.Particles(mass0=xp.PROTON_MASS_EV, p0c=7e12, x=[99,99, 99])
 p = xp.Particles(mass0=xp.PROTON_MASS_EV, p0c=7e12, x=[1,2,3], _buffer=p0._buffer)
 
 line = xt.Line(elements=[

@@ -43,7 +43,7 @@ int main(){
     }
 
     printf("%d\n", part_buffer[0]);
-    ParticlesData part = (ParticlesData) part_buffer;
+    ParticlesData part = (ParticlesData) (part_buffer + part_offset);
     for (int ii=0; ii<ParticlesData_get__capacity(part); ii++){
         printf("x[%d] = %e\n", ii, ParticlesData_get_x(part, (int64_t) ii));
     }
