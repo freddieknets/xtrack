@@ -34,6 +34,14 @@ int main(){
         printf("offs[%d] = %d\n", ii, (int)line_ele_offsets[ii]);
     }
 
+    FILE *line_ele_typeids_fid;
+    line_ele_typeids_fid = fopen("./line_ele_typeids.bin", "rb");
+    int64_t* line_ele_typeids = malloc(num_elements*sizeof(int64_t));
+    fread(line_ele_typeids, sizeof(int64_t), num_elements, line_ele_typeids_fid);
+    for (int ii=0; ii<num_elements; ii++){
+        printf("typeid[%d] = %d\n", ii, (int)line_ele_typeids[ii]);
+    }
+
     printf("%d\n", part_buffer[0]);
     ParticlesData part = (ParticlesData) part_buffer;
     for (int ii=0; ii<ParticlesData_get__capacity(part); ii++){

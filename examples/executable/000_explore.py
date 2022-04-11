@@ -21,10 +21,13 @@ with open('part.bin', 'wb') as fid:
 with open('line.bin', 'wb') as fid:
     fid.write(tracker._buffer.buffer.tobytes())
 
-# Write element offsets to file
+# write element offsets to file
 with open('line_ele_offsets.bin', 'wb') as fid:
     fid.write(tracker.ele_offsets_dev.tobytes())
 
+# write element type_ids to file
+with open('line_ele_typeids.bin', 'wb') as fid:
+    fid.write(tracker.ele_typeids_dev.tobytes())
 
 with open('conf.txt', 'w') as fid:
     fid.write(f'{len(p._buffer.buffer)}\n')
