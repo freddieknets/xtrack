@@ -21,12 +21,18 @@ int main(){
     printf("line buffer size: %d\n", line_buffer_size);
     printf("num elements: %d\n", num_elements);
 
-
-
     FILE *part_fid;
     part_fid = fopen("./part.bin", "rb");
-    int8_t* part_buffer = malloc(part_buffer_size*sizeof(double));
+    int8_t* part_buffer = malloc(part_buffer_size*sizeof(int8_t));
     fread(part_buffer, sizeof(int8_t), part_buffer_size, part_fid);
+
+    FILE *line_ele_offsets_fid;
+    line_ele_offsets_fid = fopen("./line_ele_offsets.bin", "rb");
+    int64_t* line_ele_offsets = malloc(num_elements*sizeof(int64_t));
+    fread(line_ele_offsets, sizeof(int64_t), num_elements, line_ele_offsets_fid);
+    for (int ii=0; ii<num_elements; ii++){
+        printf("offs[%d] = %d\n", ii, (int)line_ele_offsets[ii]);
+    }
 
     printf("%d\n", part_buffer[0]);
     ParticlesData part = (ParticlesData) part_buffer;
