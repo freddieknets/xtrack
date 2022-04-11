@@ -12,14 +12,18 @@ int main(){
     fscanf(conf_fid,"%d",&part_buffer_size);
     int part_offset;
     fscanf(conf_fid,"%d",&part_offset);
+    int num_elements;
+    fscanf(conf_fid,"%d",&num_elements);
     printf("part buffer size: %d\n", part_buffer_size);
     printf("part offset: %d\n", part_offset);
+    printf("num elements: %d\n", num_elements);
 
 
-    FILE *ptr;
-    ptr = fopen("./part.bin", "rb");
+
+    FILE *part_fid;
+    part_fid = fopen("./part.bin", "rb");
     int8_t* part_buffer = malloc(part_buffer_size*sizeof(double));
-    fread(part_buffer, sizeof(int8_t), part_buffer_size, ptr);
+    fread(part_buffer, sizeof(int8_t), part_buffer_size, part_fid);
 
     printf("%d\n", part_buffer[0]);
     ParticlesData part = (ParticlesData) part_buffer;

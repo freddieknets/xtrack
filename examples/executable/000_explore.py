@@ -19,4 +19,5 @@ with open('part.bin', 'wb') as fid:
 
 with open('conf.txt', 'w') as fid:
     fid.write(f'{len(p._buffer.buffer)}\n')
-    fid.write(f'{p._offset}')
+    fid.write(f'{p._offset}\n')
+    fid.write(f'{len(tracker.ele_offsets_dev)}\n')
