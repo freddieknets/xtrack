@@ -17,7 +17,12 @@ with open('xtrack.h', 'w') as fid:
 with open('part.bin', 'wb') as fid:
     fid.write(p._buffer.buffer.tobytes())
 
+# Write line buffer to file
+with open('line.bin', 'wb') as fid:
+    fid.write(tracker._buffer.buffer.tobytes())
+
 with open('conf.txt', 'w') as fid:
     fid.write(f'{len(p._buffer.buffer)}\n')
     fid.write(f'{p._offset}\n')
+    fid.write(f'{len(tracker._buffer.buffer)}\n')
     fid.write(f'{len(tracker.ele_offsets_dev)}\n')

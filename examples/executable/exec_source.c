@@ -12,10 +12,13 @@ int main(){
     fscanf(conf_fid,"%d",&part_buffer_size);
     int part_offset;
     fscanf(conf_fid,"%d",&part_offset);
+    int line_buffer_size;
+    fscanf(conf_fid,"%d",&line_buffer_size);
     int num_elements;
     fscanf(conf_fid,"%d",&num_elements);
     printf("part buffer size: %d\n", part_buffer_size);
     printf("part offset: %d\n", part_offset);
+    printf("line buffer size: %d\n", line_buffer_size);
     printf("num elements: %d\n", num_elements);
 
 
