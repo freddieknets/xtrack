@@ -1,21 +1,25 @@
 #include <stdio.h>
 #include <math.h>
+#include <stdlib.h>
 #include "xtrack.h"
 
 int main(){
     printf("Hello, world!\n");
 
+    FILE *conf_fid;
+    conf_fid = fopen("./conf.txt", "r");
+    int part_buffer_size;
+    fscanf(conf_fid,"%d",&part_buffer_size);
+    printf("part buffer size: %d\n", part_buffer_size);
+
+
     FILE *ptr;
     ptr = fopen("./part.bin", "rb");
-
-    int8_t part_buffer[1216]; // Hardcoded size for now
-
-    fread(part_buffer, sizeof(int8_t), 1216, ptr);
+    int8_t* part_buffer = malloc(part_buffer_size*sizeof(double));
+    fread(part_buffer, sizeof(int8_t), part_buffer_size, ptr);
 
     printf("%d\n", part_buffer[0]);
-
     ParticlesData part = (ParticlesData) part_buffer;
-
     for (int ii=0; ii<ParticlesData_get__capacity(part); ii++){
         printf("x[%d] = %e\n", ii, ParticlesData_get_x(part, (int64_t) ii));
     }
