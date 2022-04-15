@@ -58,4 +58,10 @@ int main(){
         printf("s[%d] = %e\n", ii, ParticlesData_get_s(particles, (int64_t) ii));
     }
 
+    FILE *out_fid;
+    out_fid = fopen("./sim_state_out.bin", "wb");
+    fwrite(SimConfig_getp_sim_state(sim_config), sizeof(int8_t),
+           SimConfig_get_sim_state_size(sim_config), out_fid);
+    return 0;
+
 }

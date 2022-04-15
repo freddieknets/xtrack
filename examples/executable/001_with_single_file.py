@@ -1,4 +1,5 @@
 import os
+import numpy as np
 
 import xobjects as xo
 import xtrack as xt
@@ -11,13 +12,13 @@ class LineMetaData(xo.Struct):
 class SimState(xo.Struct):
     particles = xp.Particles.XoStruct
     i_turn = xo.Int64
+    size = xo.Int64
 
 class SimConfig(xo.Struct):
     buffer_size = xo.Int64
     line_metadata = xo.Ref(LineMetaData)
     num_turns = xo.Int64
     sim_state = xo.Ref(SimState)
-    sim_state_size = xo.Int64
 
 simbuf = xo.ContextCpu().new_buffer()
 
@@ -41,6 +42,7 @@ sim_state = SimState(_buffer=simbuf, particles=particles._xobject, i_turn=0)
 sim_config.line_metadata = line_metadata
 sim_config.num_turns = num_turns
 sim_config.sim_state = sim_state
+sim_state.size = sim_state._size # store size of sim_state
 
 assert sim_config._offset == 0
 assert sim_config._fields[0].offset == 0
@@ -73,4 +75,12 @@ os.system('clang executable_with_xobjects.c -o exec_with_xobjects')
 
 # Run executable
 os.system('./exec_with_xobjects')
+
+# Load output
+buffer_out = tracker._buffer.context.new_buffer(capacity=sim_state.size)
+with open('sim_state_out.bin', 'rb') as fid:
+    state_bytes = fid.read(buffer_out.capacity)
+buffer_out.buffer = np.frombuffer(state_bytes, dtype=np.int8)
+sim_state_out = SimState._from_buffer(buffer=buffer_out, offset=0)
+p_out = xp.Particles(_xobject=sim_state_out.particles)
 
