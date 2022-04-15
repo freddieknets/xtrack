@@ -20,20 +20,40 @@ class SimConfig(xo.Struct):
     num_turns = xo.Int64
     sim_state = xo.Ref(SimState)
 
-simbuf = xo.ContextCpu().new_buffer()
+_master_tracker = xt.Tracker(
+    line=xt.Line(elements=[xt.Drift(length=0), xt.Multipole(knl=[0])]))
 
-sim_config = SimConfig(buffer_size=-1, _buffer=simbuf)
+# Generate C executable
+with open('simconfig.h', 'w') as fid:
+    fid.write(xo.specialize_source(LineMetaData._gen_c_api(),
+                                   specialize_for='cpu_serial'))
+    fid.write('\n')
+    fid.write(xo.specialize_source(SimState._gen_c_api(),
+                                   specialize_for='cpu_serial'))
+    fid.write('\n')
+    fid.write(xo.specialize_source(SimConfig._gen_c_api(),
+                                   specialize_for='cpu_serial'))
+
+with open('xtrack.h', 'w') as fid:
+    fid.write(_master_tracker.track_kernel.specialized_source)
+
+os.system('clang executable_with_xobjects.c -o exec_with_xobjects')
+
 
 # Simulation input
 num_turns = 10
 
 line = xt.Line(elements=[
     xt.Drift(length=1.0), xt.Multipole(knl=[1e-6]), xt.Drift(length=1.0)])
-tracker = xt.Tracker(line=line, _buffer=simbuf)
 
 particles = xp.Particles(mass0=xp.PROTON_MASS_EV, p0c=7e12, x=[1e-3,2e-3,3e-3])
 
 # Assemble data structure
+simbuf = xo.ContextCpu().new_buffer()
+sim_config = SimConfig(buffer_size=-1, _buffer=simbuf)
+tracker = xt.Tracker(line=line, _buffer=simbuf,
+                     track_kernel=_master_tracker.track_kernel,
+                     element_classes=_master_tracker.element_classes)
 line_metadata = LineMetaData(_buffer=simbuf,
                              ele_offsets=tracker.ele_offsets_dev,
                              ele_typeids=tracker.ele_typeids_dev)
@@ -54,24 +74,6 @@ sim_config.buffer_size = simbuf.capacity
 with open('sim.bin', 'wb') as fid:
     fid.write(simbuf.buffer.tobytes())
 
-# Generate C executable
-if isinstance(simbuf.context, xo.ContextCpu):
-    with open('simconfig.h', 'w') as fid:
-        fid.write(xo.specialize_source(LineMetaData._gen_c_api(),
-                                       specialize_for='cpu_serial'))
-        fid.write('\n')
-        fid.write(xo.specialize_source(SimState._gen_c_api(),
-                                       specialize_for='cpu_serial'))
-        fid.write('\n')
-        fid.write(xo.specialize_source(SimConfig._gen_c_api(),
-                                       specialize_for='cpu_serial'))
-else:
-    raise NotImplementedError
-
-with open('xtrack.h', 'w') as fid:
-    fid.write(tracker.track_kernel.specialized_source)
-
-os.system('clang executable_with_xobjects.c -o exec_with_xobjects')
 
 # Run executable
 os.system('./exec_with_xobjects')
