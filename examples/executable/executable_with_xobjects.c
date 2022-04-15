@@ -53,4 +53,9 @@ int main(){
           0//    int64_t offset_tbt_monitor
     );
 
+    // Quick check
+    for (int ii=0; ii<ParticlesData_get__capacity(particles); ii++){
+        printf("s[%d] = %e\n", ii, ParticlesData_get_s(particles, (int64_t) ii));
+    }
+
 }
