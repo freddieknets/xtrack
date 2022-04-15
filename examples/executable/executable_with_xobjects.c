@@ -35,7 +35,7 @@ int main(){
 
     int64_t* line_ele_offsets = SimConfig_getp1_line_metadata_ele_offsets(sim_config, 0);
     int64_t* line_ele_typeids = SimConfig_getp1_line_metadata_ele_typeids(sim_config, 0);
-    ParticlesData particles = SimConfig_getp_particles(sim_config);
+    ParticlesData particles = SimConfig_getp_sim_state_particles(sim_config);
 
     // This is what we want to call
     track_line(

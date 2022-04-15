@@ -1,4 +1,5 @@
-from functools import partial
+import os
+
 import xobjects as xo
 import xtrack as xt
 import xpart as xp
@@ -7,11 +8,16 @@ class LineMetaData(xo.Struct):
     ele_offsets = xo.Int64[:]
     ele_typeids = xo.Int64[:]
 
+class SimState(xo.Struct):
+    particles = xp.Particles.XoStruct
+    i_turn = xo.Int64
+
 class SimConfig(xo.Struct):
     buffer_size = xo.Int64
     line_metadata = xo.Ref(LineMetaData)
     num_turns = xo.Int64
-    particles = xo.Ref(xp.Particles.XoStruct)
+    sim_state = xo.Ref(SimState)
+    sim_state_size = xo.Int64
 
 simbuf = xo.ContextCpu().new_buffer()
 
@@ -30,9 +36,11 @@ particles = xp.Particles(mass0=xp.PROTON_MASS_EV, p0c=7e12, x=[1e-3,2e-3,3e-3])
 line_metadata = LineMetaData(_buffer=simbuf,
                              ele_offsets=tracker.ele_offsets_dev,
                              ele_typeids=tracker.ele_typeids_dev)
+
+sim_state = SimState(_buffer=simbuf, particles=particles._xobject, i_turn=0)
 sim_config.line_metadata = line_metadata
 sim_config.num_turns = num_turns
-sim_config.particles = particles.copy(_buffer=simbuf)._xobject
+sim_config.sim_state = sim_state
 
 assert sim_config._offset == 0
 assert sim_config._fields[0].offset == 0
@@ -44,10 +52,13 @@ sim_config.buffer_size = simbuf.capacity
 with open('sim.bin', 'wb') as fid:
     fid.write(simbuf.buffer.tobytes())
 
-# Generate C executable source code
+# Generate C executable
 if isinstance(simbuf.context, xo.ContextCpu):
     with open('simconfig.h', 'w') as fid:
         fid.write(xo.specialize_source(LineMetaData._gen_c_api(),
+                                       specialize_for='cpu_serial'))
+        fid.write('\n')
+        fid.write(xo.specialize_source(SimState._gen_c_api(),
                                        specialize_for='cpu_serial'))
         fid.write('\n')
         fid.write(xo.specialize_source(SimConfig._gen_c_api(),
@@ -57,3 +68,9 @@ else:
 
 with open('xtrack.h', 'w') as fid:
     fid.write(tracker.track_kernel.specialized_source)
+
+os.system('clang executable_with_xobjects.c -o exec_with_xobjects')
+
+# Run executable
+os.system('./exec_with_xobjects')
+
