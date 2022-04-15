@@ -43,3 +43,17 @@ sim_config.buffer_size = simbuf.capacity
 # Write particles buffer to file
 with open('sim.bin', 'wb') as fid:
     fid.write(simbuf.buffer.tobytes())
+
+# Generate C executable source code
+if isinstance(simbuf.context, xo.ContextCpu):
+    with open('simconfig.h', 'w') as fid:
+        fid.write(xo.specialize_source(LineMetaData._gen_c_api(),
+                                       specialize_for='cpu_serial'))
+        fid.write('\n')
+        fid.write(xo.specialize_source(SimConfig._gen_c_api(),
+                                       specialize_for='cpu_serial'))
+else:
+    raise NotImplementedError
+
+with open('xtrack.h', 'w') as fid:
+    fid.write(tracker.track_kernel.specialized_source)
