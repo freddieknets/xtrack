@@ -50,7 +50,7 @@ assert sim_config._fields[0].name == 'buffer_size'
 
 sim_config.buffer_size = simbuf.capacity
 
-# Write particles buffer to file
+# Write sim buffer to file
 with open('sim.bin', 'wb') as fid:
     fid.write(simbuf.buffer.tobytes())
 
@@ -84,3 +84,4 @@ buffer_out.buffer = np.frombuffer(state_bytes, dtype=np.int8)
 sim_state_out = SimState._from_buffer(buffer=buffer_out, offset=0)
 p_out = xp.Particles(_xobject=sim_state_out.particles)
 
+assert np.all(p_out.s == 20)
