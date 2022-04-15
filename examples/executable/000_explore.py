@@ -38,7 +38,7 @@ with open('conf.txt', 'w') as fid:
     fid.write(f'{len(tracker._buffer.buffer)}\n')
     fid.write(f'{len(tracker.ele_offsets_dev)}\n')
 
-os.system('bash compile_it.sh')
+os.system('clang first_exec_source.c -o hello')
 os.system('./hello')
 
 buffer_out = p._buffer.context.new_buffer(capacity=p._buffer.capacity)
