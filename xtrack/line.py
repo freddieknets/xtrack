@@ -953,6 +953,9 @@ class Line:
         elif isinstance(keep, str):
             keep = [keep]
 
+        if self._var_management is not None:
+            # Add all elements that are managed, we need to keep those
+
         newline = Line(elements=[], element_names=[])
 
         for ee, nn in zip(self.elements, self.element_names):
@@ -960,23 +963,18 @@ class Line:
                 continue
             newline.append_element(ee, nn)
 
-        _lref = None
-        if self._var_management is not None:
-            import xdeps as xd
-            # Update the lref to point to the new element_dict
-            manager = xd.Manager()
-            _lref = manager.ref(newline.element_dict, 'element_refs')
-
         if inplace:
             self.element_names = newline.element_names
             self.element_dict  = newline.element_dict
-            if _lref is not None:
-                self._var_management['lref'] = _lref
+            if self._var_management is not None:
+                manager = self._var_management['manager']
+                # update dict inside manager
+                manager.containers['element_refs']._owner = self.element_dict
             return self
-        elif _lref is not None:
+
+        elif self._var_management is not None:
             # copy the var management
             newline._init_var_management(dct=self._var_management_to_dict())
-            newline._var_management['lref'] = _lref
         return newline
 
     def remove_inactive_multipoles(self, inplace=True, keep=None):
