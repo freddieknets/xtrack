@@ -322,6 +322,9 @@ class Particles(xo.HybridClass):
             if field not in kwargs.keys():
                 continue
 
+            if field == 'pdg_id' and 'pdg_id' in kwargs:
+                kwargs['pdg_id'] = get_pdg_id_from_name(kwargs.get('pdg_id'))
+
             if np.isscalar(kwargs[field]) or len(kwargs[field]) == 1:
                 value = np.array(kwargs[field]).item()
                 kwargs[field] = np.full(input_length, value)
@@ -335,11 +338,8 @@ class Particles(xo.HybridClass):
                 kwargs[field] = kwargs[field].astype(xotype._dtype)
             kwargs[field] = np_to_ctx(kwargs[field])
 
-
-
         # Init independent per particle vars
         self.init_independent_per_part_vars(kwargs)
-
 
         self._update_refs(
             p0c=kwargs.get('p0c'),
@@ -1946,19 +1946,7 @@ class Particles(xo.HybridClass):
         self.py = kwargs.get('py', 0)
         self.ax = kwargs.get('ax', 0)
         self.ay = kwargs.get('ay', 0)
-
-        pdg_id = kwargs.get('pdg_id')
-        try:
-            pdg_id = get_pdg_id_from_name(pdg_id)
-            if not np.isscalar(pdg_id):
-                pdg_id = self._context.nparray_to_context_array(pdg_id)
-            self.pdg_id = pdg_id
-        except ModuleNotFoundError:
-            if pdg_id is not None:
-                raise ValueError("In order to specify `pdg_id` you must have "
-                                 "xpart installed, however, it's not currently "
-                                 "available.")
-            self.pdg_id = 0
+        self.pdg_id = kwargs.get('pdg_id', 0)
 
     @classmethod
     def reference_from_pdg_id(cls, pdg_id, **kwargs):
