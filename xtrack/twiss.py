@@ -2215,7 +2215,11 @@ def _get_eneloss_and_damping_rates(particle_on_co, R_matrix,
 def _extract_sr_distribution_properties(twiss_res):
 
     radiation_flag = twiss_res['radiation_flag']
-    if np.any((radiation_flag == 2) | (radiation_flag == 3)):
+    if np.any(
+            (radiation_flag == 2)
+            | (radiation_flag == 3)
+            | (radiation_flag == 4)
+            | (radiation_flag == 5)):
         raise ValueError('Incompatible radiation flag')
 
     hx, hy, kappa0_x, kappa0_y = _get_trajectory_curvatures(twiss_res)
