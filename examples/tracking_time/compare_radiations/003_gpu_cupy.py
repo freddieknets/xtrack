@@ -187,6 +187,22 @@ for mode in RADIATION_MODES:
         needs_rng   = mode["needs_rng"])
 
 ################################################################################
+# Output results
+################################################################################
+print("\n" + "#" * 80)
+print("Raw timing results")
+print("#" * 80)
+
+for mode in RADIATION_MODES:
+    if not mode["enabled"]:
+        continue
+
+    n_particles, particle_turn_time = results[mode["key"]]
+    print(f"\n{CONTEXT_LABEL} | {mode['label']}")
+    print("n_particles =", n_particles.tolist())
+    print("us_per_particle_turn =", (particle_turn_time * 1E6).tolist())
+
+################################################################################
 # Plot
 ################################################################################
 fig, ax = plt.subplots(figsize = (10, 6))
@@ -198,7 +214,7 @@ for mode in RADIATION_MODES:
     n_particles, particle_turn_time = results[mode["key"]]
     ax.plot(
         n_particles,
-        particle_turn_time * 1e6,
+        particle_turn_time * 1E6,
         label   = mode["label"],
         marker  = "o")
 
