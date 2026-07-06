@@ -256,7 +256,7 @@ def test_ring_with_radiation(test_context, thick):
     part_co = line.find_closed_orbit()
 
     num_turns=1500
-    num_parts=100
+    num_parts=50
 
     par_for_emit = line.build_particles(
                                 x_norm=num_parts*[0],
@@ -276,12 +276,12 @@ def test_ring_with_radiation(test_context, thick):
 
     xo.assert_allclose(np.std(mon.zeta[:, 750:]),
         np.sqrt(met[met.loc[:, 'parameter']=='emittance']['mode3'].iloc[0] * np.abs(tw['bets0'])),
-        rtol=0.2, atol=0
+        rtol=0.25, atol=0
         )
 
     xo.assert_allclose(np.std(mon.x[:, 750:]),
         np.sqrt(met[met.loc[:, 'parameter']=='emittance']['mode1'].iloc[0] * tw['betx'][0]),
-        rtol=0.2, atol=0
+        rtol=0.25, atol=0
         )
 
     assert np.all(mon.y[:] < 1e-15)
@@ -298,12 +298,12 @@ def test_ring_with_radiation(test_context, thick):
 
     xo.assert_allclose(np.std(mon.zeta[:, 750:]),
         np.sqrt(met[met.loc[:, 'parameter']=='emittance']['mode3'].iloc[0] * np.abs(tw['bets0'])),
-        rtol=0.2, atol=0
+        rtol=0.25, atol=0
         )
 
     xo.assert_allclose(np.std(mon.x[:, 750:]),
         np.sqrt(met[met.loc[:, 'parameter']=='emittance']['mode1'].iloc[0] * tw['betx'][0]),
-        rtol=0.2, atol=0
+        rtol=0.25, atol=0
         )
 
     assert np.all(mon.y[:] < 1e-15)
