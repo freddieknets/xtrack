@@ -339,6 +339,33 @@ def test_bend(case, atol):
     xo.assert_allclose(p.spin_z[0], ref['spin_z'], atol=atol, rtol=0)
 
 
+@pytest.mark.parametrize(
+    'edge_model', ['suppressed', 'linear', 'full', 'dipole-only'])
+@pytest.mark.parametrize(
+    'rbend_model', ['adaptive', 'curved-body', 'straight-body'])
+def test_spin_rbend_and_edge_models(edge_model, rbend_model):
+    env = xt.Environment()
+
+    angle = 0.1
+    env.new('rb', 'RBend', length_straight=2., angle=angle,
+            edge_entry_model=edge_model, edge_exit_model=edge_model,
+            rbend_model=rbend_model)
+
+    anomalous_magnetic_moment = 1.15965218091e-3
+
+    line = env.new_line(components=['rb'])
+    line.set_particle_ref('electron', energy0=5e9,
+                          anomalous_magnetic_moment=anomalous_magnetic_moment)
+
+    tw = line.twiss4d(betx=1, bety=1, spin=True, spin_x=1)
+
+    spin_angle = np.atan2(tw.spin_z, tw.spin_x)
+    expected_spin_angle = (
+        anomalous_magnetic_moment * line.particle_ref.gamma0[0] * angle)
+
+    xo.assert_allclose(spin_angle[-1], expected_spin_angle, rtol=1e-8)
+
+
 @pytest.mark.parametrize('h', [0.0, 0.1], ids=['straight', 'polar'])
 def test_spin_drift(h):
     bend = xt.Bend(
