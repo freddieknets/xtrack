@@ -222,6 +222,47 @@ def test_mad_import(loader):
                           atol=1e-14, rtol=0)
 
 
+def test_mad_import_aper_offset_without_aperture():
+
+    mad_src = """
+        m: marker, aper_offset={0.1, 0.2};
+        beam;
+        ss: sequence,l=1;
+            m, at=0.5;
+        endsequence;
+        """
+
+    env = xt.load(string=mad_src, format='madx')
+    line = env.ss
+
+    assert line['m'].name_associated_aperture is None
+    assert not any(ee.__class__.__name__.startswith('Limit') for ee in line.elements)
+
+
+def test_mad_import_aper_offset_on_sequence_placement():
+
+    mad_src = """
+        m: marker, apertype="circle", aperture={0.2}, aper_offset={0.1, 0.2};
+        beam;
+        ss: sequence,l=1;
+            m, at=0.5, aper_offset={0.3, 0.4};
+        endsequence;
+        """
+
+    env = xt.load(string=mad_src, format='madx')
+    line = env.ss
+
+    assert line['m'].name_associated_aperture == 'm_aper'
+    apertures = [ee for ee in line.elements if ee.__class__.__name__.startswith('Limit')]
+    assert len(apertures) == 1
+    aperture = apertures[0]
+    assert aperture.__class__.__name__ == 'LimitEllipse'
+    xo.assert_allclose(aperture.a_squ, 0.2**2, atol=1e-13, rtol=0)
+    xo.assert_allclose(aperture.b_squ, 0.2**2, atol=1e-13, rtol=0)
+    xo.assert_allclose(aperture.shift_x, 0.1, atol=1e-13, rtol=0)
+    xo.assert_allclose(aperture.shift_y, 0.2, atol=1e-13, rtol=0)
+
+
 @for_all_test_contexts
 def test_longitudinal_rect(test_context):
     np2ctx = test_context.nparray_to_context_array
