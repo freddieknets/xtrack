@@ -488,7 +488,7 @@ class Tracker:
                 )
                 return kernels['track_line']
 
-        kernel_info = self._build_kernel_from_classes(
+        kernel_info = self._compile_kernel_from_classes(
             context=self._tracker_data_base._buffer.context,
             config=self.config,
             tracker_element_classes=self._tracker_data_base.kernel_element_classes,
@@ -501,7 +501,7 @@ class Tracker:
         return kernel_info['kernel']
 
     @classmethod
-    def _build_kernel_from_classes(
+    def _compile_kernel_from_classes(
             cls,
             context,
             config,
@@ -511,17 +511,9 @@ class Tracker:
             module_name=None,
             containing_dir='.',
             compile=True,
-            particles_monitor_class=None,
     ):
-        if particles_monitor_class is None:
-            particles_monitor_class = cls._get_default_monitor_class()
-
         kernel_element_classes = _expand_element_classes_with_slice_classes(
             tracker_element_classes)
-        kernel_element_classes.update({
-            particles_monitor_class._XoStruct,
-            xt.MultiElementMonitor._XoStruct,
-        })
         kernel_element_classes = sorted(
             kernel_element_classes,
             key=lambda cc: cc._DressingClass.__name__)
