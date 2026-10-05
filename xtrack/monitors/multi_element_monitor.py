@@ -7,7 +7,7 @@ import numpy as np
 
 import xtrack as xt
 import xobjects as xo
-from xtrack.tpsa.particles import COORDS, ParticlesTpsa
+from xtrack.tpsa.particles import COORDS, _LOCAL_COORDS, _SPIN_COORDS, ParticlesTpsa
 
 # A monomial is the per-variable orders, a tuple once parsed. A request is
 # several of them, or the ones wanted per output coordinate.
@@ -91,8 +91,11 @@ class MultiElementMonitor(xt.BeamElement):
 
     _data_coord_name_to_index = {'x': 0, 'px': 1, 'y': 2, 'py': 3,
                                  'zeta': 4, 'delta': 5, 's': 6}
+    _data_coord_name_to_index |= {
+        name: ii for ii, name in enumerate(_LOCAL_COORDS + _SPIN_COORDS)
+    }
     _tpsa_coord_name_to_index = {
-        name: ii for ii, name in enumerate(COORDS)
+        name: ii for ii, name in enumerate(COORDS + _LOCAL_COORDS + _SPIN_COORDS)
     }
 
     def __init__(self, start_at_turn, stop_at_turn,
