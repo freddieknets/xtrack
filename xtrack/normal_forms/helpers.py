@@ -3,6 +3,8 @@
 # Copyright (c) CERN, 2026.                 #
 # ######################################### #
 
+from __future__ import annotations
+
 import numpy as np
 from math import factorial
 from typing import TYPE_CHECKING
@@ -103,15 +105,15 @@ def matrix_to_map(matrix: TpsaTensor, lidx: MapLongitudinalIndices) -> TpsaMap:
 
     result = TpsaMap(d)
 
-    # Transverse/oscillatory linear transformation.
-    result[:rk] = matrix[:rk,:rk] @ z[:rk]
+    A = matrix[:rk, :rk]
+    w = z[:rk]
+    result[:rk] = A @ w
 
-    # Canonical longitudinal completion for 56D.
     if ti is not None and pi is not None:
-        dA = matrix.partial_derivative(pi + 1)
+        dA = A.partial_derivative(pi + 1)
         S = symplectic_unit_matrix(rk)
-        G = matrix.T @ S @ dA
+        G = A.T @ S @ dA
+        result[ti] = z[ti] - (w @ G @ w) / 2
 
-        result[ti] = z[ti] - (z @ G @ z) / 2
 
     return TpsaMap(result.components)

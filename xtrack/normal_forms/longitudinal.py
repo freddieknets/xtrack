@@ -6,12 +6,10 @@
 from dataclasses import dataclass
 from typing import Literal, TYPE_CHECKING
 
-from madng_tpsa import Descriptor
+from madng_tpsa import Descriptor, symplectic_unit_matrix, TpsaMap
 
 from ..tpsa import COORDS
 
-if TYPE_CHECKING:
-    from madng_tpsa import TpsaMap
 
 Method = Literal['4d', '5d', '56d', '6d']
 
@@ -62,30 +60,34 @@ class MapLongitudinalIndices:
     @property
     def _selector(self):
         if self.map_size == 5:
-            return [0, 1, 2, 3, 5]
-        else:
-            return slice(None, self.map_size)
+            return (0, 1, 2, 3, 5)
+        return tuple(range(self.map_size))
 
+    @property
     def var_names(self):
-        return COORDS[self._selector]
+        return tuple(COORDS[i] for i in self._selector)
 
-    def new_descriptor(
+    def move_descriptor(
         self,
-        descriptor: Descriptor | None = None,
+        descriptor: Descriptor,
+        *,
         momentum_as_parameter: bool = False
     ) -> Descriptor:
-        var_names = self.var_names
-        param_names = None if descriptor is None else descriptor.param_names
-        promote_momentum = self.method == "4d" and momentum_as_parameter
-        max_orders = descriptor.max_orders[self._selector]
+        param_names = descriptor.param_names
+        max_orders = tuple(descriptor.max_orders[i] for i in self._selector)
         max_orders += descriptor.max_orders[descriptor.num_vars:]
-        if promote_momentum:
+        if momentum_as_parameter:
+            if self.method != '4d':
+                raise ValueError("Can only use momentum as parameter in 4D.")
             param = descriptor.var_names[5]
-            if param not in param_names:
-                param_names.append(param)
-                max_orders.append(descriptor.max_orders[5])
+            if param in param_names:
+                raise ValueError(
+                    f"Cannot use momentum {param} as parameter: already a parameter!"
+                )
+            param_names += (param,)
+            max_orders += (descriptor.max_orders[5],)
         return Descriptor(
-            var_names=var_names,
+            var_names=self.var_names,
             order=descriptor.order,
             param_names=param_names,
             max_orders=max_orders,
@@ -94,6 +96,7 @@ class MapLongitudinalIndices:
     def adapt_6d_map(
         self,
         m6: TpsaMap,
+        *,
         momentum_as_parameter: bool = False
     ) -> TpsaMap:
         """
@@ -102,28 +105,25 @@ class MapLongitudinalIndices:
         For 4D, optionally turn the conserved pzeta
         variable into an external TPSA parameter.
         """
-        if self.method == "6d":
+        if self.method == "6d" or self.method == '56d':
             return m6
-        elif self.method == '56d':
-            # TODO
-            self.check_56d_map(m6)
-            return m6
+
         src = m6.descriptor
-        dst = self.new_descriptor(src, momentum_as_parameter)
+        dst = self.move_descriptor(src, momentum_as_parameter=momentum_as_parameter)
         projection = TpsaMap(src)
         projection[4].clear()      # Remove zeta
         if self.method == "4d":
             projection[5].clear()  # Remove pzeta
         result = TpsaMap([
             tpsa.change_descriptor(dst)
-            for nn, tpsa in m6.compose(projection).named_components
+            for nn, tpsa in m6.compose(projection).named_components.items()
             if nn in self.var_names
         ])
         if self.method == "4d" and momentum_as_parameter:
             projection = TpsaMap(src)
             projection[4].clear()  # Remove zeta from reference (we don't want to keep coeffs for ζ pζ etc)
             ref = m6.compose(projection)
-            for nn, tpsa in result.named_components:
+            for nn, tpsa in result.named_components.items():
                 for monomial, value in getattr(ref, nn).monomial_coeffs(tol=0).items():
                     if monomial[5] > 0:
                         # monomial reference: (x, pₓ, y, pᵧ, ζ, pζ, param1, ..., param_n)
@@ -138,7 +138,6 @@ class MapLongitudinalIndices:
             self.check_56d_map(m, tol=tol)
         elif self.method == "5d":
             self.check_5d_map(m, tol=tol)
-        self.check_symplecticity(m, tol)
 
         # For 4D and 6D, dimension and symplecticity
         # are the main structural checks.
@@ -146,7 +145,7 @@ class MapLongitudinalIndices:
     def check_5d_map(self, m: TpsaMap, *, tol: float = 1e-11):
         if m.num_vars != 5:
             raise ValueError("5D requires five variables")
-        error = m.flat[self.momentum_index + 1] - m.descriptor.var(self.momentum_index + 1)
+        error = m.flat[self.momentum_index] - m.descriptor.var(self.momentum_index + 1)
         if any(abs(v) > tol for v in error.monomial_coeffs(tol=0).values()):
             raise ValueError("5D requires conserved pzeta")
 
@@ -171,7 +170,10 @@ class MapLongitudinalIndices:
                 )
 
     def check_symplecticity(self, m: TpsaMap, tol: float = 0):
-        # TODO
-        if self.rank != self.map_size:
-            m = TpsaMap(m.components[:self.rank])
-        print(f"Non-symplecitc coefs by degree: {m.non_symplectic_coeffs_by_degree(norm='relative_frobenius')}") # TODO
+        nn = self.map_size if self.method == '56d' else self.rank
+        J = m.jacobian()[:nn, :nn]
+        S = symplectic_unit_matrix(nn)
+        defect = (J.T @ S @ J - S).truncate(m.truncation_order - 1)
+        # print(f"Non-symplecitc coefs by degree: {m.non_symplectic_coeffs_by_degree(norm='relative_frobenius')}")
+        # TODO: need a test/assert
+        return defect
