@@ -3,15 +3,12 @@
 # Copyright (c) CERN, 2026.                 #
 # ######################################### #
 
-import numpy as np
-from warnings import warn
 from typing import TYPE_CHECKING
 
 from madng_tpsa import Descriptor, TpsaMap, TpsaTensor
 
 from .longitudinal import MapLongitudinalIndices, _parse_lidx
 from .one_turn_map import get_one_turn_map, OneTurnMap
-from .translate import translate_to_centre
 from .symplectify import symplectify as make_symplectic
 from .linear import linear_normalise
 from .parametric_twiss import ParametricTwiss
@@ -20,8 +17,7 @@ from ..line import Line
 from ..tpsa import COORDS, ParticlesTpsa
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-    from .translate import Centring
+    from collections.abc import Mapping
     from .longitudinal import Method
     from .linear import LinearNormalisation
     from ..particles import Particles
@@ -50,13 +46,14 @@ class LinearNormalForm:
         line: Line,
         *,
         method: Method | None = None,
+        momentum_as_parameter: bool = None,
         particle_ref: Particles | LineParticleRef | None = None,
         co_ref: Particles | None = None,
         co_tracking_iterations: int = 2,
         retrack_around_parametric_co: bool = True,
         symplectify: bool = True,
         max_parameter_degree: int | None = None,
-        momentum_as_parameter: bool = None,
+        parameter_scales: Mapping[str, float] | None = None,
         descriptor: Descriptor | None = None,
         verbose: bool = False,
         _lidx: MapLongitudinalIndices | None = None,
@@ -87,6 +84,7 @@ class LinearNormalForm:
             one_turn_map.centred_map,
             symplectify=symplectify,
             max_parameter_degree=max_parameter_degree,
+            parameter_scales=parameter_scales,
             _lidx=_lidx,
         )
         obj._particle_ref = particle_ref
@@ -100,8 +98,9 @@ class LinearNormalForm:
         one_turn_map: TpsaMap,
         *,
         method: Method | None = None,
-        max_parameter_degree: int | None = None,
         symplectify: bool = True,
+        max_parameter_degree: int | None = None,
+        parameter_scales: Mapping[str, float] | None = None,
         _lidx: MapLongitudinalIndices | None = None,
     ) -> LinearNormalForm:
         _lidx = _parse_lidx(method, _lidx)
@@ -114,6 +113,7 @@ class LinearNormalForm:
         linear = linear_normalise(
             symp_map,
             max_parameter_degree=max_parameter_degree,
+            parameter_scales=parameter_scales,
             _lidx=_lidx,
         )
         obj = cls()
@@ -123,7 +123,7 @@ class LinearNormalForm:
         obj._one_turn_map_result = None
         obj._symplectified_map = symp_map
         # obj._centring_result = centring
-        # obj._linear_result = linear
+        obj._linear_result = linear
         return obj
 
     @property

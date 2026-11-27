@@ -4,7 +4,7 @@
 # ######################################### #
 
 import numpy as np
-from math import factorial
+from math import prod
 from typing import TYPE_CHECKING
 from dataclasses import dataclass
 
@@ -12,10 +12,11 @@ from madng_tpsa import symplectic_unit_matrix, TpsaMap, TpsaTensor
 
 from .longitudinal import MapLongitudinalIndices
 from .helpers import as_tpsa_tensor, symplectic_inverse, exp_nilpotent_matrix, matrix_to_map
+from .inspect import inspect_residual
 from ..linear_normal_form import get_linear_normal_form
 
 if TYPE_CHECKING:
-    from madng_tpsa import Tpsa
+    from collections.abc import Mapping
     from .longitudinal import Method
 
 
@@ -35,6 +36,7 @@ def linear_normalise(
     *,
     method: Method | None = None,
     max_parameter_degree: int | None = None,
+    parameter_scales: Mapping[str, float] | None = None,
     tol: float = 1e-11,
     _lidx: MapLongitudinalIndices | None = None,
 ) -> LinearNormalisation:
@@ -55,11 +57,11 @@ def linear_normalise(
 
     if not np.allclose(centred_map.const_part[:rk], 0, atol=tol):
         raise ValueError('Map not centered!')
-    # TODO: I would additionally test the entire parameter-dependent fixed-point residual, rather than just its constant coefficient.
 
-    # print("Jacobian family centered map:")
-    family = _jacobian_family(centred_map, _lidx)
-    # check_family_symplecticity(family)
+    family = _jacobian_family(centred_map, _lidx)[:rk, :rk]
+    if parameter_scales is not None:
+        family = rescale_arguments(family, parameter_scales)
+
     M0 = family.const_part[:rk, :rk]
     a0, ai0, r0 = _normalisation_at_reference(M0, rk)
     A = as_tpsa_tensor(a0, d)
@@ -92,31 +94,11 @@ def linear_normalise(
         corrections = coefficient_matrices(relative, deg)
         K = as_tpsa_tensor(np.zeros((rk, rk)), d)
         H = as_tpsa_tensor(np.zeros((rk, rk)), d)
-        # for mono, q in corrections.items():
-        #     kk, hh = solver.solve(q)
         for mono, q in corrections.items():
             try:
                 kk, hh = solver.solve(q)
             except ValueError:
-                S = solver.S
-                defect = q.T @ S + S @ q
-
-                defect_scale = (
-                    np.abs(q).T @ np.abs(S)
-                    + np.abs(S) @ np.abs(q)
-                )
-                allowed = solver.atol + solver.rtol * defect_scale
-
-                ratio = np.abs(defect) / allowed
-                worst = np.unravel_index(np.argmax(ratio), ratio.shape)
-
-                print(f'Degree: {deg}')
-                print(f'Monomial: {mono}')
-                print(f'Largest |q|: {np.max(np.abs(q)):.6e}')
-                print(f'Largest |defect|: {np.max(np.abs(defect)):.6e}')
-                print(f'Worst violation: {ratio[worst]:.6e}')
-                print(f'Worst entry: {worst}')
-                print(f'q =\n{q}')
+                inspect_hamiltonian_defect(relative, deg, mono)
                 raise
             for i in range(rk):
                 for j in range(rk):
@@ -133,9 +115,63 @@ def linear_normalise(
             expH = exp_nilpotent_matrix(H, degree_limit, deg)
             R = expH @ R
 
+    Ainv_check = symplectic_inverse(A)
+    reconstructed = Ainv_check @ family @ A
+    residual = (reconstructed - R).truncate(degree_limit)
+
+    if parameter_scales is not None:
+        inspect_residual("Final scaled linear normal form residual", residual)
+        S = symplectic_unit_matrix(rk)
+        inspect_residual("Final scaled normalising matrix defect", (A.T @ S @ A - S).truncate(degree_limit))
+        inspect_residual("Final scaled rotation matrix defect", (R.T @ S @ R - S).truncate(degree_limit))
+        A = rescale_arguments(A, parameter_scales, inverse=True)
+        R = rescale_arguments(R, parameter_scales, inverse=True)
+
     ac, aci, Ainv = _linear_coordinate_maps(A, _lidx)
     normalised = aci << centred_map << ac
     return LinearNormalisation(_lidx.method, A, Ainv, R, ac, aci, normalised)
+
+
+def rescale_arguments(
+    tensor: TpsaTensor,
+    scales: Mapping[str, float],
+    *,
+    inverse: bool = False,
+) -> TpsaTensor:
+    """Rescale selected TPSA arguments.
+
+    Forward:
+        f(z, k) -> f(z, s*k)
+
+    Inverse:
+        f(z, k) -> f(z, k/s)
+
+    Unspecified arguments are left unchanged.
+    """
+    d = tensor.descriptor
+    names = d.var_names + d.param_names
+    unknown = set(scales) - set(names)
+    if unknown:
+        raise ValueError(f"Unknown TPSA arguments: {unknown}")
+    factors = tuple(float(scales.get(name, 1.)) for name in names)
+    if any(not np.isfinite(s) or s <= 0. for s in factors):
+        raise ValueError("Scales must be finite and positive.")
+    if inverse:
+        factors = tuple(1. / s for s in factors)
+    result = tensor.copy()
+    if all(s == 1. for s in factors):
+        return result
+    # Reuse monomial weights across tensor components.
+    weights = {}
+
+    for t in result.flat:
+        for mono, coeff in t.monomial_coeffs(tol=0.).items():
+            if mono not in weights:
+                weights[mono] = prod(s**p for s, p in zip(factors, mono) if p and s != 1.)
+            t.set(mono, coeff * weights[mono])
+
+    return result
+
 
 def _jacobian_family(m: TpsaMap, lidx: MapLongitudinalIndices) -> TpsaTensor:
     """Transverse Jacobian at zero transverse amplitude, as a polynomial
@@ -266,7 +302,9 @@ class HomologicalSolver:
         *,
         rcond: float = 1e-11,
         atol: float = 1e-11,
-        rtol: float = 1e-9
+        rtol: float = 1e-9,
+        hamiltonian_atol: float = 1e-10,
+        hamiltonian_rtol: float = 1e-9,
     ):
         self.r0 = np.asarray(r0, dtype=float)
         self.n = len(r0)
@@ -297,6 +335,8 @@ class HomologicalSolver:
         self.pinv = ((vh.T / singular_values) @ u.T)
         self.atol = atol
         self.rtol = rtol
+        self.hamiltonian_atol = hamiltonian_atol
+        self.hamiltonian_rtol = hamiltonian_rtol
 
     def rotation_part(self, q):
         h = np.zeros_like(q)
@@ -308,11 +348,23 @@ class HomologicalSolver:
     def solve(self, q):
         q = np.asarray(q, dtype=float)
 
-        # Q must belong to the Hamiltonian Lie algebra.
-        defect = q.T @ self.S + self.S @ q
-        defect_scale = (np.abs(q).T @ np.abs(self.S) + np.abs(self.S) @ np.abs(q))
-        if np.any(np.abs(defect) > self.atol + self.rtol * defect_scale):
-            raise ValueError("Input perturbation is not Hamiltonian")
+        # Separate Hamiltonian and non-Hamiltonian parts.
+        q_h = (q + self.S @ q.T @ self.S) / 2
+        q_nh = q - q_h
+
+        error = np.linalg.norm(q_nh, ord='fro')
+        scale = np.linalg.norm(q, ord='fro')
+
+        allowed = self.hamiltonian_atol + self.hamiltonian_rtol * scale
+        if not np.isfinite(error) or error > allowed:
+            raise ValueError(
+                "Input perturbation is not sufficiently Hamiltonian: "
+                f"defect={error:.6e}, allowed={allowed:.6e}"
+            )
+
+        # Remove accepted numerical noise.
+        q = q_h
+
         h = self.rotation_part(q)
         rhs = np.concatenate([(h - q).ravel(), np.zeros(self.n // 2)])
         weights = self.pinv @ rhs
@@ -325,3 +377,47 @@ class HomologicalSolver:
                 "to the requested tolerance"
             )
         return k, h
+
+
+def inspect_hamiltonian_defect(relative, degree, mono):
+    n = relative.shape[0]
+    S = symplectic_unit_matrix(n)
+
+    C = relative
+    delta0 = C.const_part - np.eye(n)
+
+    q = coefficient_matrices(C, degree)[mono]
+
+    # Actual Hamiltonian defect of the coefficient.
+    actual = q.T @ S + S @ q
+
+    # Contribution from symplecticity errors.
+    E = C.T @ S @ C - S
+    symplectic = coefficient_matrices(E, degree).get(
+        mono, np.zeros_like(q)
+    )
+
+    # Contribution from imperfect lower-order elimination.
+    lower = np.zeros_like(q)
+
+    for j in range(1, degree):
+        product = C.homogeneous(j).T @ S @ C.homogeneous(degree - j)
+        lower += coefficient_matrices(product, degree).get(mono, np.zeros_like(q))
+
+    # Contribution from the nominal error.
+    nominal = delta0.T @ S @ q + q.T @ S @ delta0
+
+    predicted = symplectic - lower - nominal
+
+    print(f"Monomial: {mono}")
+    print(f"Degree:   {degree}")
+
+    for name, value in [
+        ("Actual Hamiltonian defect", actual),
+        ("Symplectic contribution", symplectic),
+        ("Lower-order contribution", lower),
+        ("Nominal contribution", nominal),
+        ("Predicted defect", predicted),
+        ("Unexplained residual", actual - predicted),
+    ]:
+        print(f"{name:28s}: {np.abs(value).max():.6e}")
