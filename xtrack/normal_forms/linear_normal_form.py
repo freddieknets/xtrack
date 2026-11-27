@@ -12,6 +12,7 @@ from madng_tpsa import Descriptor, TpsaMap, TpsaTensor
 from .longitudinal import MapLongitudinalIndices, _parse_lidx
 from .one_turn_map import get_one_turn_map, OneTurnMap
 from .translate import translate_to_centre
+from .symplectify import symplectify as make_symplectic
 from .linear import linear_normalise
 from .parametric_twiss import ParametricTwiss
 from ..general import _print
@@ -32,13 +33,15 @@ class LinearNormalForm:
         '_longitudinal_indices',
         '_particle_ref',
         '_line',
-        '_one_turn_map',
+        '_one_turn_map_result',
+        '_symplectified_map',
         '_linear_result',
     }
     _longitudinal_indices: MapLongitudinalIndices
     _particle_ref: Particles | None
     _line: Line | None
-    _one_turn_map: OneTurnMap
+    _one_turn_map_result: OneTurnMap
+    _symplectified_map: TpsaMap
     _linear_result: LinearNormalisation
 
     @classmethod
@@ -51,6 +54,7 @@ class LinearNormalForm:
         co_ref: Particles | None = None,
         co_tracking_iterations: int = 2,
         retrack_around_parametric_co: bool = True,
+        symplectify: bool = True,
         max_parameter_degree: int | None = None,
         momentum_as_parameter: bool = None,
         descriptor: Descriptor | None = None,
@@ -62,7 +66,7 @@ class LinearNormalForm:
             print("Tracking one-turn map...")
         else:
             print("Tracking one-turn map...   ", end='')
-        local_one_turn_map = get_one_turn_map(
+        one_turn_map = get_one_turn_map(
             line=line,
             particle_ref=particle_ref,
             co_ref=co_ref,
@@ -77,16 +81,17 @@ class LinearNormalForm:
             print("Done tracking one-turn map.")
         else:
             print("done.")
-        descriptor = local_one_turn_map.centred_map.descriptor
+        descriptor = one_turn_map.centred_map.descriptor
 
         obj = cls.from_map(
-            local_one_turn_map.centred_map,
+            one_turn_map.centred_map,
+            symplectify=symplectify,
             max_parameter_degree=max_parameter_degree,
             _lidx=_lidx,
         )
-
         obj._particle_ref = particle_ref
         obj._line = line
+        obj._one_turn_map_result = one_turn_map
         return obj
 
     @classmethod
@@ -96,26 +101,29 @@ class LinearNormalForm:
         *,
         method: Method | None = None,
         max_parameter_degree: int | None = None,
+        symplectify: bool = True,
         _lidx: MapLongitudinalIndices | None = None,
     ) -> LinearNormalForm:
         _lidx = _parse_lidx(method, _lidx)
-        # Need symplecticity checks + Healy make symplectic
         _lidx.check_map(one_turn_map)
 
-        # TODO: check centring + centre if needed
+        symp_map = one_turn_map
+        if symplectify:
+            symp_map = make_symplectic(one_turn_map, _lidx=_lidx)
 
         linear = linear_normalise(
-            one_turn_map,
+            symp_map,
             max_parameter_degree=max_parameter_degree,
             _lidx=_lidx,
         )
         obj = cls()
         obj._longitudinal_indices = _lidx
-        obj._one_turn_map = one_turn_map
-        # obj._centring_result = centring
-        obj._linear_result = linear
         obj._particle_ref = None
         obj._line = None
+        obj._one_turn_map_result = None
+        obj._symplectified_map = symp_map
+        # obj._centring_result = centring
+        # obj._linear_result = linear
         return obj
 
     @property
@@ -124,7 +132,7 @@ class LinearNormalForm:
 
     @property
     def tracked_map(self) -> Particles:
-        return self._one_turn_map.retracked_map or self._one_turn_map.tracked_map
+        return self._one_turn_map_result.retracked_map or self._one_turn_map_result.tracked_map
 
     @property
     def method(self) -> Method:
@@ -132,15 +140,15 @@ class LinearNormalForm:
 
     @property
     def M(self) -> TpsaMap:
-        return self._one_turn_map.map
+        return self._one_turn_map_result.map
 
     @property
     def X(self) -> TpsaMap:
-        return self._one_turn_map.translation
+        return self._one_turn_map_result.translation
 
     @property
     def Xinv(self) -> TpsaMap:
-        return self._one_turn_map.inverse_translation
+        return self._one_turn_map_result.inverse_translation
 
     @property
     def A(self) -> TpsaMap:
@@ -168,11 +176,15 @@ class LinearNormalForm:
 
     @property
     def closed_orbit(self):
-        return self._one_turn_map.orbit
+        return self._one_turn_map_result.orbit
 
     @property
     def centred_map(self):
-        return self._one_turn_map.centred_map
+        return self._one_turn_map_result.centred_map
+
+    @property
+    def symplectified_map(self):
+        return self._symplectified_map
 
     @property
     def twiss(self, line=None, at=None) -> ParametricTwiss:

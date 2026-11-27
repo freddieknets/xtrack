@@ -171,11 +171,10 @@ class MapLongitudinalIndices:
                     f"largest residual coefficient={largest:.3e}"
                 )
 
-    def check_symplecticity(self, m: TpsaMap, tol: float = 0):
+    def symplectic_defect(self, m: TpsaMap, tol: float = 0):
         nn = self.map_size if self.method == '56d' else self.rank
         J = m.jacobian()[:nn, :nn]
         S = symplectic_unit_matrix(nn)
         defect = (J.T @ S @ J - S).truncate(m.truncation_order - 1)
         # print(f"Non-symplecitc coefs by degree: {m.non_symplectic_coeffs_by_degree(norm='relative_frobenius')}")
-        # TODO: need a test/assert
         return defect
