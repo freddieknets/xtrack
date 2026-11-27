@@ -4,34 +4,8 @@
 # ######################################### #
 
 from xtrack.normal_forms import LinearNormalForm
+from xtrack.normal_forms.inspect import inspect_symplectic_defect, inspect_linear_family
 
-from get_lhc_lattice import generate_lhc_with_params
-
-# radii = {
-#     'x':          1e-3,
-#     'px':         1e-5,
-#     'y':          1e-3,
-#     'py':         1e-5,
-#     'zeta':       1e-1,
-#     'pzeta':      1e-3,
-#     'dkqt.12r1':  1e-4,
-#     'dksd.b1':    1e-2,
-#     'dksf.b1':    1e-2,
-#     'dkod.a12b1': 1e-1,
-#     'i_mo':       100.,
-# }
-
-# radii = {
-#     name: radii[name]
-#     for name in m.descriptor.var_names + m.descriptor.param_names
-# }
-
-# m_symp = healy_symplectify(
-#     m,
-#     method='56d',
-#     radii=radii,
-# )
-from xtrack.normal_forms import LinearNormalForm
 from get_lhc_lattice import generate_lhc_with_params
 
 env, descriptor = generate_lhc_with_params('trim')
@@ -42,7 +16,11 @@ normal = LinearNormalForm.from_line(
     method='6d',
     co_tracking_iterations=1,
     retrack_around_parametric_co=True,
-    verbose=False
+    symplectify=True,
+    symplectify_before=False,
+    parameter_scales='auto',
+    coordinate_scale=2.**-10,
+    verbose=True,
 )
 
 M = normal.M
@@ -51,8 +29,8 @@ Ms = normal.symplectified_map
 lidx = normal._longitudinal_indices
 P = normal.tracked_map
 c = normal.closed_orbit
-X = normal.translation
-Xinv = normal.inverse_translation
+X = normal.X
+Xinv = normal.Xinv
 A = normal.A
 Ainv = normal.Ainv
 
@@ -69,3 +47,10 @@ print(M.substitute(0.).format()) # This substitutes the coordinates but not the 
 print("Verifying composition, (X^(-1) << (M << X)) - Mc:")
 difference = (Xinv << (M << X)) - Mc
 print(difference.format())
+
+print("Inspection:")
+print(f"Argument scales: {normal.argument_scales}")
+inspect_symplectic_defect(normal.scaled_normalised_map, lidx)
+inspect_linear_family(normal.scaled_normalised_map, lidx)
+
+tw = normal.twiss()

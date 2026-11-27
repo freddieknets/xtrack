@@ -3,9 +3,11 @@
 # Copyright (c) CERN, 2026.                 #
 # ######################################### #
 
+from __future__ import annotations
+
 import numpy as np
-from math import prod
-from typing import TYPE_CHECKING
+from math import floor, log2, prod
+from typing import Literal, TYPE_CHECKING
 from dataclasses import dataclass
 
 from madng_tpsa import symplectic_unit_matrix, TpsaMap, TpsaTensor
@@ -13,6 +15,7 @@ from madng_tpsa import symplectic_unit_matrix, TpsaMap, TpsaTensor
 from .longitudinal import MapLongitudinalIndices
 from .helpers import as_tpsa_tensor, symplectic_inverse, exp_nilpotent_matrix, matrix_to_map
 from .inspect import inspect_residual
+from .symplectify import nominal_symplecticity_error, symplectify
 from ..linear_normal_form import get_linear_normal_form
 
 if TYPE_CHECKING:
@@ -29,6 +32,9 @@ class LinearNormalisation:
     normalising_map: TpsaMap                # Canonical map Cartesian -> centred physical
     inverse_normalising_map: TpsaMap
     normalised_map: TpsaMap                 # Full linearly normalised map
+    symplectified_map: TpsaMap              # Corrected map in physical coordinates
+    scaled_normalised_map: TpsaMap          # Map in the internal numerical basis
+    argument_scales: dict[str, float]       # Physical argument = scale * internal argument
 
 
 def linear_normalise(
@@ -36,8 +42,11 @@ def linear_normalise(
     *,
     method: Method | None = None,
     max_parameter_degree: int | None = None,
-    parameter_scales: Mapping[str, float] | None = None,
+    parameter_scales: Mapping[str, float] | Literal['auto'] | None = 'auto',
+    coordinate_scale: float = 2.**-10,
+    symplectify_after: bool = False,
     tol: float = 1e-11,
+    verbose: bool = False,
     _lidx: MapLongitudinalIndices | None = None,
 ) -> LinearNormalisation:
     """Parameter-dependent real linear normal form.
@@ -45,6 +54,11 @@ def linear_normalise(
     All Taylor coefficients of A are computed by solving the parameter-wise
     homological equations, not by finite-differencing eigenvectors. In 5D/56D
     the parameter family includes pzeta; in 4D/6D it contains external knobs.
+
+    With symplectify_after, correct the full map in scaled normalised
+    coordinates after factoring out the nominal rotation. Returned A, R
+    and the physical map use the original argument conventions; the scaled
+    normalised map is also retained for subsequent nonlinear analysis.
     """
     if _lidx is None:
         _lidx = MapLongitudinalIndices.from_method(method)
@@ -58,37 +72,52 @@ def linear_normalise(
     if not np.allclose(centred_map.const_part[:rk], 0, atol=tol):
         raise ValueError('Map not centered!')
 
-    family = _jacobian_family(centred_map, _lidx)[:rk, :rk]
-    if parameter_scales is not None:
-        family = rescale_arguments(family, parameter_scales)
+    if symplectify_after:
+        # Do not let a change of basis hide a large physical nominal defect.
+        error = nominal_symplecticity_error(centred_map, _lidx)
+        if not np.isfinite(error) or error >= 1e-8:
+            raise ValueError(f"Map is too far from symplectic: nominal defect={error:.6e}")
 
-    M0 = family.const_part[:rk, :rk]
+    family = _jacobian_family(centred_map, _lidx)[:rk, :rk]
+    M0 = family.const_part
     a0, ai0, r0 = _normalisation_at_reference(M0, rk)
     A = as_tpsa_tensor(a0, d)
     Ainv = as_tpsa_tensor(ai0, d)
     B = Ainv @ family @ A
     R = as_tpsa_tensor(r0, d)
 
-    default_degree = d.order - 1
+    default_degree = centred_map.truncation_order - 1
     if pi is None:
         default_degree = min(default_degree, d.param_order if d.num_params else 0)
     degree_limit = default_degree if max_parameter_degree is None else max_parameter_degree
     if not 0 <= degree_limit <= default_degree:
         raise ValueError(f'max_parameter_degree must lie in [0, {default_degree}]')
 
-    solver = HomologicalSolver(r0)
+    parameter_names = _parameter_names(d, _lidx)
+    if parameter_scales == 'auto':
+        parameter_scales = infer_parameter_scales(B, _lidx, degree_limit)
+    elif parameter_scales is None:
+        parameter_scales = {}
+    elif isinstance(parameter_scales, str):
+        raise ValueError("Unknown parameter scaling mode.")
+    else:
+        parameter_scales = dict(parameter_scales)
+    unknown = set(parameter_scales) - set(parameter_names)
+    if unknown:
+        raise ValueError(f"Cannot scale canonical coordinates as parameters: {unknown}")
+    family = rescale_arguments(family, parameter_scales)
+    B = rescale_arguments(B, parameter_scales)
+    scales = _map_argument_scales(d, _lidx, parameter_scales, coordinate_scale)
+    if verbose:
+        print(f"Normal form argument scales: {scales}")
+
+    solver = HomologicalSolver(r0) if degree_limit else None
 
     for deg in range(1, degree_limit + 1):
+        assert solver is not None
         # Compare with the *already accumulated* parameter-dependent rotation.
         # This matters beyond first order: the raw second-order coefficient of
         # exp(mu(k)*S) is not itself an infinitesimal Hamiltonian matrix.
-
-        if deg == 2:
-            previous = B @ R.T
-            first_order = coefficient_matrices(previous, 1)
-            print('Remaining first-order perturbations:')
-            for monomial, matrix in first_order.items():
-                print(monomial, np.abs(matrix).max())
 
         relative = B @ R.T  # R^-1 = R^T
         corrections = coefficient_matrices(relative, deg)
@@ -97,9 +126,10 @@ def linear_normalise(
         for mono, q in corrections.items():
             try:
                 kk, hh = solver.solve(q)
-            except ValueError:
-                inspect_hamiltonian_defect(relative, deg, mono)
-                raise
+            except ValueError as exc:
+                raise ValueError(
+                    f"Linear normalisation failed at degree {deg}, monomial {mono}: {exc}"
+                ) from exc
             for i in range(rk):
                 for j in range(rk):
                     if kk[i, j] != 0:
@@ -107,29 +137,155 @@ def linear_normalise(
                     if hh[i, j] != 0:
                         H[i, j].set(mono, float(hh[i, j]))
         if any(not t.is_zero() for t in K.flat):
-            expK = exp_nilpotent_matrix(K, degree_limit, deg)
-            expMinusK = exp_nilpotent_matrix(-K, degree_limit, deg)
+            expK = exp_nilpotent_matrix(K, default_degree, deg)
+            expMinusK = exp_nilpotent_matrix(-K, default_degree, deg)
             A = A @ expK
             B = expMinusK @ B @ expK
         if any(not t.is_zero() for t in H.flat):
-            expH = exp_nilpotent_matrix(H, degree_limit, deg)
+            expH = exp_nilpotent_matrix(H, default_degree, deg)
             R = expH @ R
 
+    # Check the original (unprojected) homological problem. Projection in
+    # solve() must not silently discard a significant non-Hamiltonian part.
     Ainv_check = symplectic_inverse(A)
-    reconstructed = Ainv_check @ family @ A
-    residual = (reconstructed - R).truncate(degree_limit)
+    residual = (Ainv_check @ family @ A - R).truncate(degree_limit)
+    _check_scaled_residual(residual, "Linear normal form reconstruction")
+    S = symplectic_unit_matrix(rk)
+    _check_scaled_residual((A.T @ S @ A - S).truncate(degree_limit), "Normalising matrix")
+    _check_scaled_residual((R.T @ S @ R - S).truncate(degree_limit), "Rotation matrix")
+    if verbose:
+        inspect_residual("Scaled linear normal form residual", residual)
+        if solver is not None:
+            print(f"Largest discarded non-Hamiltonian norm: {solver.max_discarded:.6e}")
 
-    if parameter_scales is not None:
-        inspect_residual("Final scaled linear normal form residual", residual)
-        S = symplectic_unit_matrix(rk)
-        inspect_residual("Final scaled normalising matrix defect", (A.T @ S @ A - S).truncate(degree_limit))
-        inspect_residual("Final scaled rotation matrix defect", (R.T @ S @ R - S).truncate(degree_limit))
-        A = rescale_arguments(A, parameter_scales, inverse=True)
-        R = rescale_arguments(R, parameter_scales, inverse=True)
+    # Work in the scaled algebra from here. In 56D the pzeta derivative
+    # in matrix_to_map is now with respect to the scaled momentum, as
+    # required by the conformally symplectic scaling of zeta and pzeta.
+    ac_scaled, aci_scaled, _ = _linear_coordinate_maps(A, _lidx)
+    physical_scaled = rescale_map(centred_map, scales)
+    normalised_scaled = aci_scaled << (physical_scaled << ac_scaled)
 
+    corrected = centred_map
+    if symplectify_after:
+        rot0 = matrix_to_map(as_tpsa_tensor(r0, d), _lidx)
+        rot0inv = matrix_to_map(as_tpsa_tensor(r0.T, d), _lidx)
+        near_identity = rot0inv << normalised_scaled
+        near_identity = symplectify(near_identity, _lidx=_lidx)
+        normalised_scaled = rot0 << near_identity
+        _check_scaled_residual(
+            _lidx.symplectic_defect(normalised_scaled), "Post-symplectification defect"
+        )
+
+        # Verify that symplectification has not changed the solved linear
+        # family beyond its numerical tolerance (only the solved orders).
+        actual = _jacobian_family(normalised_scaled, _lidx)[:rk, :rk]
+        _check_scaled_residual(
+            (actual - R).truncate(degree_limit), "Post-symplectification linear family"
+        )
+        corrected_scaled = ac_scaled << (normalised_scaled << aci_scaled)
+        corrected = rescale_map(corrected_scaled, scales, inverse=True)
+
+    normalised = rescale_map(normalised_scaled, scales, inverse=True)
+    A = rescale_arguments(A, parameter_scales, inverse=True)
+    R = rescale_arguments(R, parameter_scales, inverse=True)
     ac, aci, Ainv = _linear_coordinate_maps(A, _lidx)
-    normalised = aci << centred_map << ac
-    return LinearNormalisation(_lidx.method, A, Ainv, R, ac, aci, normalised)
+    return LinearNormalisation(
+        _lidx.method, A, Ainv, R, ac, aci, normalised,
+        corrected, normalised_scaled, scales,
+    )
+
+
+def _parameter_names(d, lidx):
+    names = d.param_names
+    if lidx.momentum_index is not None:
+        names += (d.var_names[lidx.momentum_index],)
+    return names
+
+
+def infer_parameter_scales(family, lidx, degree_limit, *, target=1e-2):
+    """Conservative, binary coefficient equilibration (not physical radii)."""
+    if not np.isfinite(target) or target <= 0.:
+        raise ValueError("Target must be finite and positive.")
+    d = family.descriptor
+    names = d.var_names + d.param_names
+    active = {names.index(name): 0 for name in _parameter_names(d, lidx)}
+    # Conserved relative momentum is naturally small, even for an
+    # achromatic linear family. This also covers 4D momentum as a knob.
+    for i in active:
+        if names[i] == 'pzeta':
+            active[i] = -10
+    for t in family.flat:
+        for mono, value in t.monomial_coeffs(tol=0.).items():
+            degree = sum(mono)
+            if not 0 < degree <= degree_limit:
+                continue
+            magnitude = abs(value)
+            if not np.isfinite(magnitude):
+                raise ValueError("Non-finite linear family coefficient.")
+            if not magnitude:
+                continue
+            if any(power and i not in active for i, power in enumerate(mono)):
+                raise ValueError("Expected a parameter-only Jacobian family.")
+            exponent = min(0, floor((log2(target) - log2(magnitude)) / degree))
+            for i in active:
+                if mono[i]:
+                    active[i] = min(active[i], exponent)
+    if any(e < -500 for e in active.values()):
+        raise ValueError("Automatic parameter scaling is excessively small.")
+    return {names[i]: 2.**e for i, e in active.items()}
+
+
+def _map_argument_scales(d, lidx, parameter_scales, coordinate_scale):
+    a = float(coordinate_scale)
+    if not np.isfinite(a) or a <= 0.:
+        raise ValueError("Coordinate scale must be finite and positive.")
+    scales = {name: a for name in d.var_names[:lidx.rank]}
+    scales.update(parameter_scales)
+    if lidx.momentum_index is not None:
+        p_name = d.var_names[lidx.momentum_index]
+        p_scale = float(scales.setdefault(p_name, 1.))
+        if lidx.time_index is not None:
+            # D.T @ S @ D = a**2 * S, also in the longitudinal plane.
+            scales[d.var_names[lidx.time_index]] = a**2 / p_scale
+    return {name: float(scales.get(name, 1.))
+            for name in d.var_names + d.param_names}
+
+
+def _check_scaled_residual(residual, name, *, atol=1e-9):
+    """Absolute coefficient check in the numerical, not physical, basis."""
+    error = 0.
+    for t in residual.flat:
+        for value in t.monomial_coeffs(tol=0.).values():
+            if not np.isfinite(value):
+                raise ValueError(f"{name}: non-finite residual.")
+            error = max(error, abs(value))
+    if error > atol:
+        raise ValueError(f"{name}: scaled residual {error:.6e} exceeds {atol:.6e}.")
+
+
+def rescale_map(m: TpsaMap, scales: Mapping[str, float], *, inverse=False) -> TpsaMap:
+    """D^-1 M(D z, s k), or its inverse change of representation."""
+    d = m.descriptor
+    names = d.var_names + d.param_names
+    if set(scales) - set(names):
+        raise ValueError("Unknown TPSA argument in map scales.")
+    factors = tuple(float(scales.get(name, 1.)) for name in names)
+    if any(not np.isfinite(s) or s <= 0. for s in factors):
+        raise ValueError("Scales must be finite and positive.")
+    if inverse:
+        factors = tuple(1. / s for s in factors)
+    result = m.copy()
+    if all(s == 1. for s in factors):
+        return result
+    weights = {}
+    for i, t in enumerate(result.flat):
+        for mono, coeff in t.monomial_coeffs(tol=0.).items():
+            if mono not in weights:
+                weights[mono] = prod(s**p for s, p in zip(factors, mono) if p)
+            # The identity monomial gets exactly weight one, including
+            # for non-binary user-provided momentum scales.
+            t.set(mono, coeff * (weights[mono] / factors[i]))
+    return result
 
 
 def rescale_arguments(
@@ -337,6 +493,7 @@ class HomologicalSolver:
         self.rtol = rtol
         self.hamiltonian_atol = hamiltonian_atol
         self.hamiltonian_rtol = hamiltonian_rtol
+        self.max_discarded = 0.
 
     def rotation_part(self, q):
         h = np.zeros_like(q)
@@ -363,6 +520,7 @@ class HomologicalSolver:
             )
 
         # Remove accepted numerical noise.
+        self.max_discarded = max(self.max_discarded, float(error))
         q = q_h
 
         h = self.rotation_part(q)

@@ -102,14 +102,7 @@ def get_one_turn_map(
 ):
     if not isinstance(line, Line):
         raise ValueError("Argument `line` should be an `xt.Line`!")
-    if particle_ref is None:
-        if line.particle_ref is None:
-            raise ValueError("A reference particle is required")
-        particle_ref = line.particle_ref.copy()
-    elif not isinstance(particle_ref, (Particles, LineParticleRef )):
-        raise ValueError("`particle_ref` needs to be a `Particles` instance!")
-    elif particle_ref._capacity != 1:
-        raise ValueError("`particle_ref` needs to be a single particle!")
+    particle_ref = _resolve_particle_ref(line, particle_ref)
 
     _lidx = _parse_lidx(method, _lidx)
     if _lidx.method == '4d' and momentum_as_parameter is None:
@@ -246,6 +239,18 @@ def get_one_turn_map(
         centring_residual = diff,
         longitudinal_drift = longitudinal_drift
     )
+
+
+def _resolve_particle_ref(line, particle_ref):
+    if particle_ref is None:
+        if line.particle_ref is None:
+            raise ValueError("A reference particle is required")
+        particle_ref = line.particle_ref.copy()
+    elif not isinstance(particle_ref, (Particles, LineParticleRef )):
+        raise ValueError("`particle_ref` needs to be a `Particles` instance!")
+    elif particle_ref._capacity != 1:
+        raise ValueError("`particle_ref` needs to be a single particle!")
+    return particle_ref
 
 
 def _create_map_from_co(co_ref, descriptor, new_co=None):
