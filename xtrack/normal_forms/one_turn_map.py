@@ -15,7 +15,7 @@ from madng_tpsa import Descriptor, TpsaMap
 from .longitudinal import MapLongitudinalIndices, _parse_lidx
 from .helpers import get_descriptor_from_env_or_line
 from ..general import _print
-from ..line import Line, LineParticleRef
+from ..line import Line, LineParticleRef, _preserve_track_flags
 from ..particles import Particles
 from ..twiss.closed_orbit import ClosedOrbitSearchError
 from ..tpsa import COORDS, ParticlesTpsa
@@ -74,12 +74,13 @@ class OneTurnMap:
     :math:`A = I`.
     """
     method: Method
-    reference_orbit: np.ndarray          # c0:  Numerical closed orbit c0
-    orbit: TpsaMap                       # c0 + c(k):  Full closed orbit
     tracked_map: ParticlesTpsa           # P(z, k) = Mphys(z+c0, k):  Actual output of tracking, including auxiliary coordinates
     retracked_map: ParticlesTpsa | None  # Retracked (c0 optimised)
-    map: TpsaMap                         # M0(z, k) = Mphys(z+c0, k) - c0:  Map relative to the reference orbit
-    centred_map: TpsaMap                 # Mcentre = X^(-1) << M0 << X:  Map relative to the full orbit (and longitudinally corrected)
+    reference_orbit: np.ndarray          # c0:  Numerical closed orbit c0
+    orbit: TpsaMap                       # c0 + c(k):  Full closed orbit in the dimensions of the map
+    orbit_6d: TpsaMap                    # Full closed orbit included coordinates potentially not present in the map
+    map: TpsaMap                         # M(z, k) = Mphys(z+c0, k) - c0:  Map relative to the reference orbit
+    centred_map: TpsaMap                 # Mcentre = X^(-1) << M << X:  Map relative to the full orbit (and longitudinally corrected)
     translation: TpsaMap                 # X:  Translation to centre and longitudinally correct (in 56D) the map
     inverse_translation: TpsaMap         # X^(-1)
     centring_residual: np.ndarray        # Mcentre(0, 0) = diff  (should be 0)
@@ -156,49 +157,64 @@ def get_one_turn_map(
 
     c0 = np.array([getattr(co_ref, cc)[0] for cc in COORDS])
 
-    # One-turn map around numerical (parameter-free) closed orbit
-    # -----------------------------------------------------------
-    tracked_map = _create_map_from_co(co_ref, descriptor, c0)
-    line.track(tracked_map)
-    m = tracked_map.to_map() - c0
-    if verbose:
-        _print(f"R orbit residual:  {m.const_part}")
+    # Tracking
+    # --------
+    with _preserve_track_flags(line):
+        if _lidx.method in ('4d', '5d', '56d'):
+            line.tracker.track_flags.XS_FLAG_KILL_CAVITY_KICK = True
 
-    # Newton correction to improve residual
-    for i in range(co_tracking_iterations - 1):
-        rank = _lidx.rank
-        R = m.evaluate_jacobian()[:rank, :rank]
-        epsilon = m.const_part[:rank]
-        correction = np.linalg.solve(np.eye(rank) - R, epsilon)
-        c0[:rank] += correction
-
+        # One-turn map around numerical (parameter-free) closed orbit
         tracked_map = _create_map_from_co(co_ref, descriptor, c0)
         line.track(tracked_map)
         m = tracked_map.to_map() - c0
         if verbose:
-            _print(f"Corrected orbit residual (iteration {i+2}):  {m.const_part}")
+            _print(f"R orbit residual:  {m.const_part}")
 
-    # Solve for parameter-dependent closed orbit
-    # ------------------------------------------
-    ck = _get_parameter_orbit(m, _lidx)
-    forward, backward = _get_orbit_translation(ck, _lidx)
-    orbit = ck.copy()
-    orbit.const_part = c0
+        # Newton correction to improve residual
+        for i in range(co_tracking_iterations - 1):
+            rank = _lidx.rank
+            R = m.evaluate_jacobian()[:rank, :rank]
+            epsilon = m.const_part[:rank]
+            correction = np.linalg.solve(np.eye(rank) - R, epsilon)
+            c0[:rank] += correction
 
-    retracked_map = None
-    if retrack_around_parametric_co:
-        retracked_map = _create_map_from_initial_map(co_ref, forward + c0)
-        line.track(retracked_map)
-        centred_map = retracked_map.to_map() - c0
-        # Solve parameter-dependent closed orbit again
+            tracked_map = _create_map_from_co(co_ref, descriptor, c0)
+            line.track(tracked_map)
+            m = tracked_map.to_map() - c0
+            if verbose:
+                _print(f"Corrected orbit residual (iteration {i+2}):  {m.const_part}")
+
+        # Solve for parameter-dependent closed orbit
         ck = _get_parameter_orbit(m, _lidx)
         forward, backward = _get_orbit_translation(ck, _lidx)
         orbit = ck.copy()
         orbit.const_part = c0
 
+        retracked_map = None
+        if retrack_around_parametric_co:
+            # Track again
+            retracked_map = _create_map_from_initial_map(co_ref, forward + c0)
+            line.track(retracked_map)
+            m = retracked_map.to_map() - c0
+            # Solve parameter-dependent closed orbit again
+            ck = _get_parameter_orbit(m, _lidx)
+            forward, backward = _get_orbit_translation(ck, _lidx)
+            orbit = ck.copy()
+            orbit.const_part = c0
+
     # Centre!
     # -------
     centred_map = backward << (m << forward)
+
+    # Mc6 = backward << (m << forward)
+    # options = dict(momentum_as_parameter=True)
+    # Mc4 = _lidx.adapt_6d_map(Mc6, **options)
+    # M4 = _lidx.adapt_6d_map(m, **options)
+    # X4 = _lidx.adapt_6d_map(forward, **options)
+    # Xinv4 = _lidx.adapt_6d_map(backward, **options)
+    # # Does dimensional reduction commute with composition?
+    # error = (Xinv4 << (M4 << X4)) - Mc4
+    # print(error.format())
 
     # Centre exactly around zero
     diff = centred_map.const_part.copy()
@@ -218,10 +234,11 @@ def get_one_turn_map(
 
     return OneTurnMap(
         method = _lidx.method,
-        reference_orbit = c0,
-        orbit = orbit,
         tracked_map = tracked_map,
         retracked_map = retracked_map,
+        reference_orbit = c0,
+        orbit = _lidx.adapt_6d_map(orbit, momentum_as_parameter=momentum_as_parameter),
+        orbit_6d = orbit,
         map = _lidx.adapt_6d_map(m, momentum_as_parameter=momentum_as_parameter),
         centred_map = _lidx.adapt_6d_map(centred_map, momentum_as_parameter=momentum_as_parameter),
         translation = _lidx.adapt_6d_map(forward, momentum_as_parameter=momentum_as_parameter),
@@ -260,30 +277,31 @@ def _create_map_from_initial_map(co_ref, initial_map):
     return ParticlesTpsa(descriptor=initial_map.descriptor, **particle_kwargs)
 
 
-def _get_parameter_orbit(m, _lidx):
+def _get_parameter_orbit(m, _lidx, *, momentum_as_parameter=False):
     d = m.descriptor
     identity = TpsaMap(d)
 
     # Remove const_part (needed for inverse) and subtract identity: M'(z, k) = M(z,k) - z - c1
     shifted = m - identity
-    # Cannot set slice on TpsaTensor.const_part directly!
-    long_const_part = shifted.const_part.copy()[_lidx.rank:] # store
-    shifted.const_part = 0
+    shifted.const_part = 0.
 
     # Root of M' is fixed-point: M( c(k), k ) = c(k) + c1
-    if _lidx.method == "6d":
+    if _lidx.method == '6d':
         return shifted.inverse().substitute(0.)
 
-    # Invert only the four transverse fixed-point equations.
+    # Longitudinal variables are spectators in the transverse fixed-point problem.
+    shifted[4] = identity.zeta.copy()
+    shifted[5] = identity.pzeta.copy()
     inverse = shifted.partial_inverse([True, True, True, True, False, False])
-    inv_const_part = inverse.const_part.copy()
-    inv_const_part[_lidx.rank:] = long_const_part
-    inverse.const_part
 
-    # Let pzeta free
-    root = inverse.substitute(x=0., px=0., y=0., py=0., zeta=0.)
+    keep_momentum = _lidx.method in ('5d', '56d') or momentum_as_parameter
 
-    # The longitudinal coordinates are not orbit corrections.
+    if keep_momentum:
+        # Let pzeta free
+        root = inverse.substitute(x=0., px=0., y=0., py=0., zeta=0.)
+    else:
+        root = inverse.substitute(0.)
+
     return TpsaMap([*root.components[:4], d.zero(), d.zero()])
 
 
@@ -317,3 +335,49 @@ def _get_orbit_translation(ck, _lidx):
     backward[4] = I.zeta - g + g_at_c
 
     return forward, backward
+
+
+def get_fixed_point_residual(m: TpsaMap, lidx: MapLongitudinalIndices) -> TpsaMap:
+    d = m.descriptor
+    rank = lidx.rank
+    zero_indices = tuple(range(rank))
+
+    # In 56D, also evaluate at zeta = 0.
+    if 'zeta' in d.var_names and rank == 4:
+        zero_indices += (d.var_names.index('zeta'),)
+    residual = TpsaMap([d.zero() for _ in range(d.num_vars)])
+    for i in range(rank):
+        for mono, coeff in m.components[i].monomial_coeffs(tol=0.).items():
+            if any(mono[j] for j in zero_indices):
+                continue
+            residual.set_coefficient(i, mono, coeff)
+    return residual
+
+def get_fixed_point_residual_coefficients(
+    m: TpsaMap,
+    lidx: MapLongitudinalIndices,
+) -> dict[tuple[int, ...], np.ndarray]:
+    residual = get_fixed_point_residual(m, lidx)
+    coefficients = {}
+    for i, component in enumerate(residual.components[:lidx.rank]):
+        for mono, coeff in component.monomial_coeffs(tol=0.).items():
+            if mono not in coefficients:
+                coefficients[mono] = np.zeros(lidx.rank)
+            coefficients[mono][i] = coeff
+    return coefficients
+
+def remove_fixed_point_residual(m: TpsaMap, lidx: MapLongitudinalIndices,) -> tuple[TpsaMap, TpsaMap]:
+    residual = get_fixed_point_residual(m, lidx)
+    corrected = m - residual
+    if lidx.method == '56d':
+        rx_p = residual.x.derivative('pzeta')
+        rpx_p = residual.px.derivative('pzeta')
+        ry_p = residual.y.derivative('pzeta')
+        rpy_p = residual.py.derivative('pzeta')
+        corrected[4] = m.zeta - (
+              rx_p  * corrected.px
+            - rpx_p * corrected.x
+            + ry_p  * corrected.py
+            - rpy_p * corrected.y
+        )
+    return corrected, residual

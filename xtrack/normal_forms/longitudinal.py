@@ -97,7 +97,7 @@ class MapLongitudinalIndices:
         self,
         m6: TpsaMap,
         *,
-        momentum_as_parameter: bool = False
+        momentum_as_parameter: bool = False,
     ) -> TpsaMap:
         """
         Reduce a validated 6D/56D map to 4D or 5D.
@@ -105,31 +105,33 @@ class MapLongitudinalIndices:
         For 4D, optionally turn the conserved pzeta
         variable into an external TPSA parameter.
         """
-        if self.method == "6d" or self.method == '56d':
+        if m6.descriptor.var_names != COORDS:
+            raise ValueError("Expected a six-dimensional map")
+        if momentum_as_parameter and self.method != '4d':
+            raise ValueError("Momentum can only be promoted in 4D")
+        if self.method in ('6d', '56d'):
             return m6
-
         src = m6.descriptor
         dst = self.move_descriptor(src, momentum_as_parameter=momentum_as_parameter)
-        projection = TpsaMap(src)
-        projection[4].clear()      # Remove zeta
-        if self.method == "4d":
-            projection[5].clear()  # Remove pzeta
-        result = TpsaMap([
-            tpsa.change_descriptor(dst)
-            for nn, tpsa in m6.compose(projection).named_components.items()
-            if nn in self.var_names
-        ])
-        if self.method == "4d" and momentum_as_parameter:
-            projection = TpsaMap(src)
-            projection[4].clear()  # Remove zeta from reference (we don't want to keep coeffs for ζ pζ etc)
-            ref = m6.compose(projection)
-            for nn, tpsa in result.named_components.items():
-                for monomial, value in getattr(ref, nn).monomial_coeffs(tol=0).items():
-                    if monomial[5] > 0:
-                        # monomial reference: (x, pₓ, y, pᵧ, ζ, pζ, param1, ..., param_n)
-                        # monomial result:    (x, pₓ, y, pᵧ,        param1, ..., param_n, pζ)
-                        tpsa.set(monomial[:4] + monomial[6:] + (monomial[5],), value)
-        return result
+        keep = self._selector
+        components = []
+        for i in keep:
+            result = dst.complex_zero() if m6.is_complex else dst.zero()
+            for mono, coeff in m6.components[i].monomial_coeffs(tol=0.).items():
+                # Eliminate zeta.
+                if mono[4]:
+                    continue
+                # Eliminate momentum only for strict 4D.
+                if (self.method == '4d' and not momentum_as_parameter and mono[5]):
+                    continue
+                new_mono = tuple(mono[j] for j in keep) + mono[6:]
+                if momentum_as_parameter:
+                    new_mono += (mono[5],)
+                if not dst.is_valid_monomial(new_mono):
+                    raise ValueError(f"Destination descriptor cannot represent monomial {new_mono}")
+                result.set(new_mono, coeff)
+            components.append(result)
+        return TpsaMap(components)
 
     def check_map(self, m: TpsaMap, *, tol=1e-11):
         if m.num_vars != self.map_size:
