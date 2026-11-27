@@ -178,7 +178,7 @@ def get_one_turn_map(
                 _print(f"Corrected orbit residual (iteration {i+2}):  {m.const_part}")
 
         # Solve for parameter-dependent closed orbit
-        ck = _get_parameter_orbit(m, _lidx)
+        ck = _get_parameter_orbit(m, _lidx, momentum_as_parameter=momentum_as_parameter)
         forward, backward = _get_orbit_translation(ck, _lidx)
         orbit = ck.copy()
         orbit.const_part = c0
@@ -190,7 +190,7 @@ def get_one_turn_map(
             line.track(retracked_map)
             m = retracked_map.to_map() - c0
             # Solve parameter-dependent closed orbit again
-            ck = _get_parameter_orbit(m, _lidx)
+            ck = _get_parameter_orbit(m, _lidx, momentum_as_parameter=momentum_as_parameter)
             forward, backward = _get_orbit_translation(ck, _lidx)
             orbit = ck.copy()
             orbit.const_part = c0

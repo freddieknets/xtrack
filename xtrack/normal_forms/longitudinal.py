@@ -133,6 +133,46 @@ class MapLongitudinalIndices:
             components.append(result)
         return TpsaMap(components)
 
+    def lift_to_6d(self, m: TpsaMap, descriptor: Descriptor) -> TpsaMap:
+        """Embed a reduced-dimensional map in the original 6D descriptor.
+
+        Missing coordinates become identity components. A pzeta
+        parameter, if present, becomes a canonical variable again.
+        """
+        self.check_map(m)
+        src = m.descriptor
+        dst = descriptor
+        if src.var_names != self.var_names:
+            raise ValueError("Unexpected source coordinate ordering.")
+        if dst.var_names != COORDS:
+            raise ValueError("Expected a six-dimensional descriptor.")
+        if src is dst:
+            return m.copy()
+
+        src_names = src.var_names + src.param_names
+        dst_names = dst.var_names + dst.param_names
+        if not set(src_names).issubset(dst_names):
+            raise ValueError("Incompatible source and target descriptors.")
+
+        indices = [dst_names.index(name) for name in src_names]
+        order = m.truncation_order
+        if order > dst.order:
+            raise ValueError("Target descriptor has insufficient order.")
+
+        result = list(dst.vars())
+        for i, name in enumerate(src.var_names):
+            component = dst.zero(order=order)
+            for mono, coeff in m.components[i].monomial_coeffs(tol=0.).items():
+                new_mono = [0] * dst.monomial_length
+                for index, power in zip(indices, mono):
+                    new_mono[index] = power
+                if not dst.is_valid_monomial(new_mono):
+                    raise ValueError(f"Target descriptor cannot represent monomial {new_mono}.")
+                component.set(new_mono, coeff)
+            result[COORDS.index(name)] = component
+
+        return TpsaMap(result)
+
     def check_map(self, m: TpsaMap, *, tol=1e-11):
         if m.num_vars != self.map_size:
             raise ValueError(f"{self.method} requires {self.map_size} variables; got {m.num_vars}")

@@ -16,14 +16,10 @@ def extract_linear_family(transported_map, rank: int, momentum_index: int | None
     variable. No nonlinear-amplitude dependence remains in W.
     """
     d = transported_map.descriptor
-    nv = transported_map.num_vars
-    projection = TpsaMap([
-        d.var(i + 1) if i == momentum_index else d.zero()
-        for i in range(nv)
-    ])
-    orbit_map = transported_map << projection
-    jac = transported_map.jacobian() << projection
-    orbit = [orbit_map.flat[i] for i in range(nv)]
+    substitutions = {name: 0. for i, name in enumerate(d.var_names) if i != momentum_index}
+    orbit_map = transported_map.substitute(**substitutions)
+    jac = transported_map.jacobian().substitute(**substitutions)
+    orbit = list(orbit_map.components)
     w = np.empty((rank, rank), dtype=object)
     for i in range(rank):
         for j in range(rank):
@@ -51,45 +47,57 @@ def _twiss_matrices(w):
     return alpha, beta, gamma
 
 
-def _parametric_phases(w):
+def _parametric_phases(w, nominal_phases=None):
     """Continuous nominal phase, TPSA perturbation about each nominal phase.
 
     Fix each mode's gauge using its physical position coordinate (x, y, zeta).
     This requires a nonzero projection of the mode into that coordinate at
     every observation point. For strongly coupled systems, a more sophisticated
     continuously transported phase gauge is needed.
+
+    nominal_phases, if supplied, contains the independently
+    unwrapped nominal phases in radians.
     """
     rank, _, count = w.shape
     nm = rank // 2
     out = np.empty((nm, count), dtype=object)
+
+    if nominal_phases is not None:
+        nominal_phases = np.asarray(nominal_phases)
+        if nominal_phases.shape != (nm, count):
+            raise ValueError("Invalid nominal phase array shape.")
+
     for j in range(nm):
         row, col = 2 * j, 2 * j
-        a0, b0 = w[row, col, 0], w[row, col + 1, 0]
+        a0 = w[row, col, 0]
+        b0 = w[row, col + 1, 0]
         principal = np.empty(count, dtype=float)
         raw = []
         for s in range(count):
-            a, b = w[row, col, s], w[row, col + 1, s]
+            a = w[row, col, s]
+            b = w[row, col + 1, s]
             real = a * a0 + b * b0
             imag = b * a0 - a * b0
             principal[s] = np.arctan2(float(imag.const_part), float(real.const_part))
             raw.append((real, imag))
-        unwrapped = np.unwrap(principal)
+
+        if nominal_phases is None:
+            unwrapped = np.unwrap(principal)
+        else:
+            unwrapped = nominal_phases[j]
+
         for s, (real, imag) in enumerate(raw):
             theta0 = principal[s]
             ct, st = np.cos(theta0), np.sin(theta0)
-            # atan2(imag, real) expanded about the nominal complex value.
-            # The numerator has zero constant coefficient and the denominator
-            # is positive at the reference parameters.
             numerator = imag * ct - real * st
             denominator = real * ct + imag * st
             if float(denominator.const_part) <= 1e-24:
-                raise ValueError(
-                    f"Mode {j} projection vanishes at location {s}; "
-                    "cannot extract a phase from this coordinate."
-                )
-            out[j, s] = real.descriptor.constant(float(unwrapped[s])) + np.arctan(
-                numerator / denominator
-            )
+                raise ValueError(f"Mode {j} projection vanishes at location {s}.")
+            delta = np.arctan(numerator / denominator)
+            # The nominal phase was determined independently.
+            delta.const_part = 0.
+            out[j, s] = real.descriptor.constant(float(unwrapped[s])) + delta
+
     return out
 
 
@@ -104,31 +112,29 @@ class ParametricTwiss:
     phase_advance: np.ndarray         # (mode, nlocations), Tpsa, in turns
     _phase_matrix: np.ndarray | None = field(default=None, init=False, repr=False)
     _A_matrix: np.ndarray | None = field(default=None, init=False, repr=False)
+    _full_turn_tunes: np.ndarray | None = field(default=None, init=False, repr=False)
 
     @classmethod
-    def from_maps(cls, transported_maps, *, rank=6, momentum_index=None):
+    def from_maps(cls, transported_maps, *, rank=6, momentum_index=None, nominal_phases=None):
         """Build from an ordered dict of maps, with the start map first.
 
         The names correspond to the start of the element when maps were saved.
         """
-        names = tuple(transported_maps)
+        families = {
+            name: extract_linear_family(m, rank=rank, momentum_index=momentum_index)
+            for name, m in transported_maps.items()
+        }
+        return cls.from_families(families, nominal_phases=nominal_phases)
+
+    @classmethod
+    def from_families(cls, families, *, nominal_phases=None):
+        names = tuple(families)
         if not names:
-            raise ValueError("No transported maps")
-        count = len(names)
-        nv = next(iter(transported_maps.values())).num_vars
-        orbit = np.empty((nv, count), dtype=object)
-        w = np.empty((rank, rank, count), dtype=object)
-        for s, name in enumerate(names):
-            oo, ww = extract_linear_family(
-                transported_maps[name],
-                rank=rank,
-                momentum_index=momentum_index,
-            )
-            for i in range(nv):
-                orbit[i, s] = oo[i]
-            w[:, :, s] = ww
+            raise ValueError("No transported linear families.")
+        orbit = np.stack([families[name][0] for name in names], axis=-1)
+        w = np.stack([families[name][1] for name in names], axis=-1)
         alpha, beta, gamma = _twiss_matrices(w)
-        phases = _parametric_phases(w) / (2 * np.pi)
+        phases = _parametric_phases(w, nominal_phases=nominal_phases) / (2 * np.pi)
         return cls(names, orbit, w, alpha, beta, gamma, phases)
 
     @property
@@ -145,7 +151,9 @@ class ParametricTwiss:
 
     @property
     def tunes(self):
-        """Unwrapped phase advance at last observation in turns."""
+        """Full-turn tunes if available, otherwise the last phase."""
+        if self._full_turn_tunes is not None:
+            return self._full_turn_tunes
         return self.phase_advance[:, -1]
 
     @property
@@ -189,3 +197,19 @@ class ParametricTwiss:
                         out[i, j + 1, s] = -u * ss + v * c
             self._A_matrix = out
         return self._A_matrix
+
+    def select(self, at):
+        indices = {name: i for i, name in enumerate(self.names)}
+        ii = [indices[name] for name in at]
+        result = type(self)(
+            tuple(at),
+            self.orbit[..., ii],
+            self.W_matrix[..., ii],
+            self.alpha_matrix[..., ii],
+            self.beta_matrix[..., ii],
+            self.gamma_matrix[..., ii],
+            self.phase_advance[..., ii],
+        )
+        if self._full_turn_tunes is not None:
+            result._full_turn_tunes = self._full_turn_tunes.copy()
+        return result
